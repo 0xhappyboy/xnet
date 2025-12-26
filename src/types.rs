@@ -1,3 +1,5 @@
+// types.rs
+use std::fmt;
 use std::net::IpAddr;
 
 #[derive(Debug, Clone)]
@@ -10,6 +12,21 @@ pub enum Protocol {
     ICMP,
     ARP,
     Other(String),
+}
+
+impl fmt::Display for Protocol {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Protocol::TCP => write!(f, "TCP"),
+            Protocol::UDP => write!(f, "UDP"),
+            Protocol::HTTP => write!(f, "HTTP"),
+            Protocol::HTTPS => write!(f, "HTTPS"),
+            Protocol::DNS => write!(f, "DNS"),
+            Protocol::ICMP => write!(f, "ICMP"),
+            Protocol::ARP => write!(f, "ARP"),
+            Protocol::Other(s) => write!(f, "{}", s),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
