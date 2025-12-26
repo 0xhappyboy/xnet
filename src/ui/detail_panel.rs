@@ -128,40 +128,53 @@ pub fn render_hex_panel(frame: &mut Frame, area: Rect, app: &App) {
                 };
                 let mut spans = Vec::new();
                 let mut chars = line.chars().enumerate();
+                spans.push(Span::styled(
+                    format!("{:04X}: ", i * 16),
+                    Style::default().fg(Color::DarkGray),
+                ));
+                let mut hex_bytes = Vec::new();
+                let mut ascii_chars = Vec::new();
+                let mut in_ascii_section = false;
                 while let Some((pos, c)) = chars.next() {
-                    let char_style = if pos < 6 {
-                        Style::default().fg(Color::DarkGray)
-                    } else if pos >= 6 && pos < 55 {
-                        let hex_char = format!("{}", c);
-                        if hex_char != " " {
-                            Style::default().fg(Color::Green)
-                        } else {
-                            Style::default().fg(Color::DarkGray)
+                    if pos >= 6 && pos < 55 && !in_ascii_section {
+                        if c != ' ' {
+                            hex_bytes.push(c);
                         }
+                    } else if pos >= 55 {
+                        in_ascii_section = true;
+                        ascii_chars.push(c);
+                    }
+                }
+                for (j, byte_char) in hex_bytes.iter().enumerate() {
+                    let char_style = if *byte_char != ' ' {
+                        Style::default().fg(Color::Green)
                     } else {
-                        if c.is_ascii_graphic() || c == ' ' {
-                            Style::default().fg(Color::Yellow)
-                        } else {
-                            Style::default().fg(Color::Red)
-                        }
+                        Style::default().fg(Color::DarkGray)
+                    };
+                    spans.push(Span::styled(byte_char.to_string(), char_style));
+                    if j % 2 == 1 && j < hex_bytes.len() - 1 {
+                        spans.push(Span::raw(" "));
+                    }
+                }
+                spans.push(Span::raw("  "));
+                for c in &ascii_chars {
+                    let char_style = if c.is_ascii_graphic() || *c == ' ' {
+                        Style::default().fg(Color::Yellow)
+                    } else {
+                        Style::default().fg(Color::Red)
                     };
                     spans.push(Span::styled(c.to_string(), char_style));
                 }
-                let mut full_line = vec![Span::styled(
-                    format!("{:04X}: ", i * 16),
-                    Style::default().fg(Color::DarkGray),
-                )];
-                full_line.extend(spans);
-                ListItem::new(Line::from(full_line)).style(style)
+                ListItem::new(Line::from(spans)).style(style)
             })
             .collect();
         let list = List::new(hex_lines).highlight_style(Style::default().bg(Color::DarkGray));
         frame.render_stateful_widget(list, inner_area, &mut app.hex_list_state.clone());
         let stats_area = Rect {
             x: inner_area.x,
-            y: inner_area.y + inner_area.height - 2,
+            y: inner_area.y + inner_area.height - 1,
             width: inner_area.width,
-            height: 2,
+            height: 1,
         };
         let line_count = detail.hex_dump.lines().count();
         let stats_text = format!(
@@ -174,13 +187,11 @@ pub fn render_hex_panel(frame: &mut Frame, area: Rect, app: &App) {
         let stats = Paragraph::new(Line::from(stats_text))
             .style(Style::default().fg(Color::DarkGray))
             .block(Block::default().borders(Borders::TOP));
-
         frame.render_widget(stats, stats_area);
     } else {
         let message = Paragraph::new(Line::from("Select a packet to view hex dump"))
             .style(Style::default().fg(Color::DarkGray))
             .alignment(ratatui::prelude::Alignment::Center);
-
         frame.render_widget(message, inner_area);
     }
 }

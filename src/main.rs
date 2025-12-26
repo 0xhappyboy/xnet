@@ -1,4 +1,5 @@
 mod app;
+mod protocol;
 mod types;
 mod ui;
 

@@ -381,7 +381,10 @@ impl App {
                 name: "Ethernet Layer".to_string(),
                 fields: vec![
                     ("Source MAC".to_string(), "00:1A:2B:3C:4D:5E".to_string()),
-                    ("Destination MAC".to_string(), "AA:BB:CC:DD:EE:FF".to_string()),
+                    (
+                        "Destination MAC".to_string(),
+                        "AA:BB:CC:DD:EE:FF".to_string(),
+                    ),
                     ("Type".to_string(), "0x0800 (IPv4)".to_string()),
                     ("Length".to_string(), "1500".to_string()),
                 ],
@@ -399,7 +402,10 @@ impl App {
                         .to_string(),
                     ),
                     ("Source Address".to_string(), packet.source.to_string()),
-                    ("Destination Address".to_string(), packet.destination.to_string()),
+                    (
+                        "Destination Address".to_string(),
+                        packet.destination.to_string(),
+                    ),
                     ("TTL".to_string(), "64".to_string()),
                     (
                         "Protocol".to_string(),
@@ -478,13 +484,14 @@ impl App {
                     ],
                 });
             }
-            let hex_dump = "0000: 00 1A 2B 3C 4D 5E AA BB  CC DD EE FF 08 00 45 00\n\
-                          0010: 00 3C 12 34 40 00 40 06  8A BC C0 A8 01 64 08 08\n\
-                          0020: 08 08 9C 40 00 50 12 34  56 78 00 00 00 00 50 02\n\
-                          0030: 20 00 91 7C 00 00 47 45  54 20 2F 20 48 54 54 50\n\
-                          0040: 2F 31 2E 31 0D 0A 48 6F  73 74 3A 20 65 78 61 6D\n\
-                          0050: 70 6C 65 2E 63 6F 6D 0D  0A 55 73 65 72 2D 41 67\n\
-                          0060: 65 6E 74 3A 20 78 6E 65  74 2F 30 2E 31 2E 30 0D"
+            let hex_dump = "\
+0000: 00 1A 2B 3C 4D 5E AA BB  CC DD EE FF 08 00 45 00  ..+<M^......E.
+0010: 00 3C 12 34 40 00 40 06  8A BC C0 A8 01 64 08 08  .<.4@.@......d..
+0020: 08 08 9C 40 00 50 12 34  56 78 00 00 00 00 50 02  ...@.P.Vx....P.
+0030: 20 00 91 7C 00 00 47 45  54 20 2F 20 48 54 54 50   ..|..GET / HTTP
+0040: 2F 31 2E 31 0D 0A 48 6F  73 74 3A 20 65 78 61 6D  /1.1..Host: exam
+0050: 70 6C 65 2E 63 6F 6D 0D  0A 55 73 65 72 2D 41 67  ple.com..User-Ag
+0060: 65 6E 74 3A 20 78 6E 65  74 2F 30 2E 31 2E 30 0D  ent: xnet/0.1.0"
                 .to_string();
             self.packet_detail = Some(PacketDetail {
                 layers,
