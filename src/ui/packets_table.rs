@@ -1,4 +1,7 @@
-use crate::{app::{App, UIFocus}, types::Protocol};
+use crate::{
+    app::{App, UIFocus},
+    types::Protocol,
+};
 use ratatui::{
     Frame,
     layout::Constraint,
@@ -9,7 +12,6 @@ use ratatui::{
 };
 
 pub fn render_packets_table(frame: &mut Frame, area: Rect, app: &mut App) {
-    // Create table header
     let header = Row::new(vec![
         Cell::from("Time"),
         Cell::from("Source"),

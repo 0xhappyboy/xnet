@@ -74,7 +74,10 @@ pub fn render_interfaces_panel(frame: &mut Frame, area: Rect, app: &App) {
                 Line::from(vec![
                     Span::raw("  Total: "),
                     Span::styled(
-                        format!("{} packets", interface.packets_received + interface.packets_sent),
+                        format!(
+                            "{} packets",
+                            interface.packets_received + interface.packets_sent
+                        ),
                         Style::default().fg(Color::Cyan),
                     ),
                     Span::raw(" / "),
