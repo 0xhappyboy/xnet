@@ -8,3 +8,5 @@ chrono = "0.4.42"
 ratatui = "0.30.0"
 crossterm = "0.27"
 tokio = { version = "1.37", features = ["full"] }
+netdev = "0.40.0"
+pnet = "0.35.0"

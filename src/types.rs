@@ -10,6 +10,8 @@ pub enum Protocol {
     DNS,
     ICMP,
     ARP,
+    IP,
+    IPv6,
     Other(String),
 }
 
@@ -24,6 +26,8 @@ impl fmt::Display for Protocol {
             Protocol::ICMP => write!(f, "ICMP"),
             Protocol::ARP => write!(f, "ARP"),
             Protocol::Other(s) => write!(f, "{}", s),
+            Protocol::IP => write!(f, "IP"),
+            Protocol::IPv6 => write!(f, "IPv6"),
         }
     }
 }

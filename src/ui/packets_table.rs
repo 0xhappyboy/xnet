@@ -38,6 +38,8 @@ pub fn render_packets_table(frame: &mut Frame, area: Rect, app: &mut App) {
                 Protocol::DNS => Color::Yellow,
                 Protocol::ICMP => Color::Red,
                 Protocol::ARP => Color::LightRed,
+                Protocol::IP => Color::Reset,
+                Protocol::IPv6 => Color::LightMagenta,
                 Protocol::Other(_) => Color::Gray,
             };
             let style = if is_selected {
