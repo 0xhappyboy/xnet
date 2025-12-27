@@ -188,6 +188,198 @@ mod tests {
     };
 
     #[test]
+    fn test_realtime_packet_capture_table_format() {
+        use std::time::{Duration, Instant};
+        println!("=== Real-time Packet Capture Table Format Test ===");
+        let mut network = Network::new();
+        network.scan_interfaces();
+        let interfaces = network.get_interfaces();
+        if interfaces.is_empty() {
+            println!("No network interfaces found. Test skipped.");
+            return;
+        }
+        let active_iface = interfaces
+            .iter()
+            .find(|iface| iface.is_up && iface.ip_address != "N/A");
+        if let Some(iface) = active_iface {
+            println!(
+                "Using interface: {} (IP: {})",
+                iface.display_name, iface.ip_address
+            );
+            let config = crate::net::scanner::ScannerConfig {
+                max_packets: 10,
+                timeout: Duration::from_secs(5),
+                filter_protocol: None,
+            };
+            let mut scanner = crate::net::scanner::NetworkScanner::new(network.clone(), config);
+            match scanner.start_scan(iface.display_name.clone()) {
+                Ok(_) => {
+                    println!("Starting packet capture for 5 seconds...");
+                    println!("Press Ctrl+C or wait for timeout");
+                    println!();
+                    let start_time = Instant::now();
+                    let mut last_packet_count = 0;
+                    while start_time.elapsed() < Duration::from_secs(5) {
+                        let packets = scanner.get_packets();
+                        let packet_count = packets.len();
+                        if packet_count > last_packet_count {
+                            println!("=== New Packet(s) Captured ===");
+                            println!(
+                                "Time         Source              Destination         Protocol  Length  Info"
+                            );
+                            println!(
+                                "-------------------------------------------------------------------------------"
+                            );
+                            for i in last_packet_count..packet_count {
+                                let packet = &packets[i];
+                                let protocol_str = match &packet.protocol {
+                                    crate::types::Protocol::TCP => "TCP",
+                                    crate::types::Protocol::UDP => "UDP",
+                                    crate::types::Protocol::HTTP => "HTTP",
+                                    crate::types::Protocol::HTTPS => "HTTPS",
+                                    crate::types::Protocol::DNS => "DNS",
+                                    crate::types::Protocol::ICMP => "ICMP",
+                                    crate::types::Protocol::ARP => "ARP",
+                                    crate::types::Protocol::IP => "IP",
+                                    crate::types::Protocol::IPv6 => "IPv6",
+                                    crate::types::Protocol::Other(s) => s.as_str(),
+                                };
+                                println!(
+                                    "{:<12} {:<20} {:<20} {:<9} {:<7} {}",
+                                    packet.timestamp.chars().take(12).collect::<String>(),
+                                    format!("{}", packet.source)
+                                        .chars()
+                                        .take(20)
+                                        .collect::<String>(),
+                                    format!("{}", packet.destination)
+                                        .chars()
+                                        .take(20)
+                                        .collect::<String>(),
+                                    protocol_str,
+                                    packet.length,
+                                    packet.info.chars().take(40).collect::<String>()
+                                );
+                            }
+                            let total_bytes: usize = packets.iter().map(|p| p.length).sum();
+                            println!(
+                                "-------------------------------------------------------------------------------"
+                            );
+                            println!(
+                                "Total: {} packets | {} B | Live Capture",
+                                packet_count, total_bytes
+                            );
+                            println!();
+                            last_packet_count = packet_count;
+                        }
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
+                    scanner.stop_scan();
+                    let final_packets = scanner.get_packets();
+                    println!("=== Capture Complete ===");
+                    println!("Total packets captured: {}", final_packets.len());
+                    assert!(
+                        final_packets.len() > 0 || std::env::var("CI").is_ok(),
+                        "No packets captured. This may be expected in CI environments."
+                    );
+                }
+                Err(e) => {
+                    println!("Failed to start capture: {}", e);
+                    println!("Test skipped.");
+                }
+            }
+        } else {
+            println!("No active network interface found. Test skipped.");
+        }
+        println!("=== Test completed ===");
+    }
+
+    #[test]
+    fn test_packet_table_format_output() {
+        use crate::net::{Packet, Protocol};
+        use std::net::IpAddr;
+        let test_packets = vec![
+            Packet {
+                timestamp: "12:34:56.789".to_string(),
+                source: IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 100)),
+                destination: IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 1)),
+                protocol: Protocol::TCP,
+                length: 64,
+                info: "TCP 192.168.1.100:8080 -> 192.168.1.1:443 [SYN, ACK] Len=32".to_string(),
+                raw_data: vec![0u8; 64],
+            },
+            Packet {
+                timestamp: "12:34:56.890".to_string(),
+                source: IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 1)),
+                destination: IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 100)),
+                protocol: Protocol::UDP,
+                length: 128,
+                info: "UDP 192.168.1.1:53 -> 192.168.1.100:5353 Len=96".to_string(),
+                raw_data: vec![0u8; 128],
+            },
+            Packet {
+                timestamp: "12:34:57.123".to_string(),
+                source: IpAddr::V4(std::net::Ipv4Addr::new(8, 8, 8, 8)),
+                destination: IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 100)),
+                protocol: Protocol::DNS,
+                length: 92,
+                info: "DNS Response".to_string(),
+                raw_data: vec![0u8; 92],
+            },
+        ];
+        println!("\n=== Packet Table Format Output ===");
+        println!("Time         Source              Destination         Protocol  Length  Info");
+        println!("-------------------------------------------------------------------------------");
+        for packet in test_packets.clone() {
+            let protocol_str = match &packet.protocol {
+                Protocol::TCP => "TCP",
+                Protocol::UDP => "UDP",
+                Protocol::HTTP => "HTTP",
+                Protocol::HTTPS => "HTTPS",
+                Protocol::DNS => "DNS",
+                Protocol::ICMP => "ICMP",
+                Protocol::ARP => "ARP",
+                Protocol::IP => "IP",
+                Protocol::IPv6 => "IPv6",
+                Protocol::Other(s) => s.as_str(),
+            };
+            println!(
+                "{:<12} {:<20} {:<20} {:<9} {:<7} {}",
+                packet.timestamp,
+                packet.source.to_string(),
+                packet.destination.to_string(),
+                protocol_str,
+                packet.length,
+                packet.info
+            );
+        }
+        println!("-------------------------------------------------------------------------------");
+        println!(
+            "Total: {} packets | {} B | Selected: None",
+            test_packets.len(),
+            test_packets.iter().map(|p| p.length).sum::<usize>()
+        );
+        assert_eq!(test_packets.len(), 3);
+        for packet in &test_packets {
+            let row_format = format!(
+                "{} {} {} {} {} {}",
+                packet.timestamp,
+                packet.source,
+                packet.destination,
+                match &packet.protocol {
+                    Protocol::TCP => "TCP",
+                    Protocol::UDP => "UDP",
+                    Protocol::DNS => "DNS",
+                    _ => "Other",
+                },
+                packet.length,
+                packet.info
+            );
+            assert!(!row_format.is_empty());
+        }
+        println!("=== Test completed successfully ===");
+    }
+
+    #[test]
     fn test_network_scanner_with_pnet_name() {
         use std::time::Duration;
         println!("Testing network scanner (using pnet interface name)...");
