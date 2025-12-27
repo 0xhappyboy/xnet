@@ -5,7 +5,6 @@
 an analysis and monitoring tool focused on the network domain.
 </h4>
 <p align="center">
-  <a href="https://github.com/0xhappyboy/xnet/LICENSE"><img src="https://img.shields.io/badge/License-GPL3.0-d1d1f6.svg?style=flat&labelColor=1C2C2E&color=BEC5C9&logo=googledocs&label=license&logoColor=BEC5C9" alt="License"></a>
     <a href="https://crates.io/crates/solana-network-sdk">
 <img src="https://img.shields.io/badge/crates-solana--network--sdk-20B2AA.svg?style=flat&labelColor=0F1F2D&color=FFD700&logo=rust&logoColor=FFD700">
 </a>
