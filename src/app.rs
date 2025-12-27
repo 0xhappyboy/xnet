@@ -115,8 +115,6 @@ impl App {
         let selected_iface_idx = self.selected_interface % self.interfaces.len();
         let selected_iface = &self.interfaces[selected_iface_idx];
         let config = ScannerConfig {
-            max_packets: usize::MAX,
-            timeout: Duration::from_secs(10),
             filter_protocol: None,
         };
         let mut scanner = NetworkScanner::new(self.network.clone(), config);
@@ -124,8 +122,7 @@ impl App {
         let packets_clone = self.packets.clone();
         let interface_name = selected_iface.name.clone();
         let processing_thread = thread::spawn(move || {
-            let timeout_duration = Duration::from_millis(100);
-            while let Ok(packet) = rx.recv_timeout(timeout_duration) {
+            while let Ok(packet) = rx.recv() {
                 let mut packets_write = packets_clone.write().unwrap();
                 let (src_port, dst_port) = Self::parse_ports_from_info(&packet.info);
                 let network_packet = NetworkPacket {
@@ -151,10 +148,9 @@ impl App {
             match scanner.start_scan(interface_name, move |packet| {
                 let _ = tx.send(packet);
             }) {
-                Ok(_) => {
-                    std::thread::sleep(Duration::from_millis(100));
-                    scanner.stop_scan();
-                }
+                Ok(_) => loop {
+                    std::thread::sleep(Duration::from_secs(1));
+                },
                 Err(e) => {}
             }
         });

@@ -15,8 +15,6 @@ use crate::net::{Network, Packet, PacketDetail, PacketLayer, Protocol};
 
 #[derive(Debug, Clone)]
 pub struct ScannerConfig {
-    pub max_packets: usize,
-    pub timeout: Duration,
     pub filter_protocol: Option<Protocol>,
 }
 
@@ -79,15 +77,7 @@ impl NetworkScanner {
                     return;
                 }
             };
-            let start_time = Instant::now();
-            let mut packet_count = 0;
             loop {
-                if start_time.elapsed() > config.timeout {
-                    break;
-                }
-                if packet_count >= config.max_packets {
-                    break;
-                }
                 match receiver.next() {
                     Ok(packet_data) => {
                         if let Some(parsed_packet) = Self::parse_packet(&packet_data) {
@@ -97,7 +87,6 @@ impl NetworkScanner {
                                 }
                             }
                             callback(parsed_packet);
-                            packet_count += 1;
                         }
                     }
                     Err(e) => {
@@ -148,12 +137,6 @@ impl NetworkScanner {
         let start_time = Instant::now();
         let mut packet_count = 0;
         loop {
-            if start_time.elapsed() > config.timeout {
-                break;
-            }
-            if packet_count >= config.max_packets {
-                break;
-            }
             match receiver.next() {
                 Ok(packet) => {
                     if let Some(parsed_packet) = Self::parse_packet(&packet) {
@@ -171,7 +154,6 @@ impl NetworkScanner {
                 Err(e) => {}
             }
         }
-
         Ok(())
     }
 

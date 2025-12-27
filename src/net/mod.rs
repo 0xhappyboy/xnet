@@ -207,8 +207,6 @@ mod tests {
                 iface.display_name, iface.ip_address
             );
             let config = crate::net::scanner::ScannerConfig {
-                max_packets: 10,
-                timeout: Duration::from_secs(5),
                 filter_protocol: None,
             };
             let mut scanner = crate::net::scanner::NetworkScanner::new(network.clone(), config);
@@ -409,8 +407,6 @@ mod tests {
             println!("  IP: {}", ethernet_iface.ip_address);
             if ethernet_iface.pnet_name != "N/A" {
                 let config = ScannerConfig {
-                    max_packets: 1,
-                    timeout: Duration::from_secs(3),
                     filter_protocol: None,
                 };
                 let mut packet_scanner = NetworkScanner::new(network.clone(), config);
