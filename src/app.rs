@@ -1,4 +1,10 @@
-use crate::{net::{Network, scanner::{NetworkScanner, ScannerConfig}}, types::{NetworkInterface, NetworkPacket, Packet, PacketDetail}};
+use crate::{
+    net::{
+        Network,
+        scanner::{NetworkScanner, ScannerConfig},
+    },
+    types::{NetworkInterface, NetworkPacket, Packet, PacketDetail},
+};
 use ratatui::widgets::{ListState, TableState};
 use std::{
     sync::{
@@ -22,6 +28,7 @@ pub struct App {
     pub ui_focus: UIFocus,
     pub capture_active: Arc<AtomicBool>,
     pub interfaces: Vec<NetworkInterface>,
+    pub current_interface: Option<NetworkInterface>,
     pub packets: Arc<RwLock<Vec<NetworkPacket>>>,
     pub selected_packet: Option<usize>,
     pub packet_detail: Option<PacketDetail>,
@@ -54,12 +61,13 @@ impl App {
         hex_list_state.select(Some(0));
         let mut network = Network::new();
         network.scan_interfaces();
-        let interfaces = Self::get_real_interfaces(&network);
+        let interfaces = Self::get_interfaces(&network);
         Self {
             should_quit: false,
             ui_focus: UIFocus::Packets,
             capture_active: Arc::new(AtomicBool::new(false)),
-            interfaces: interfaces,
+            interfaces: interfaces.clone(),
+            current_interface: None,
             packets: Arc::new(RwLock::new(Vec::new())),
             selected_packet: None,
             packet_detail: None,
@@ -83,7 +91,7 @@ impl App {
         }
     }
 
-    fn get_real_interfaces(network: &Network) -> Vec<NetworkInterface> {
+    fn get_interfaces(network: &Network) -> Vec<NetworkInterface> {
         let interfaces = network.get_interfaces();
         interfaces
             .iter()
@@ -102,20 +110,18 @@ impl App {
             .collect()
     }
 
-    pub fn start_real_capture(&mut self) {
+    pub fn start_capture(&mut self) {
         self.capture_active.store(true, Ordering::SeqCst);
         if self.interfaces.is_empty() {
             return;
         }
-        let selected_iface_idx = self.selected_interface % self.interfaces.len();
-        let selected_iface = &self.interfaces[selected_iface_idx];
         let config = ScannerConfig {
             filter_protocol: None,
         };
         let mut scanner = NetworkScanner::new(self.network.clone(), config);
         let (tx, rx) = std::sync::mpsc::channel::<Packet>();
         let packets_clone = self.packets.clone();
-        let interface_name = selected_iface.name.clone();
+        let interface_name = self.current_interface.clone().unwrap().name.clone();
         let capture_active_clone = self.capture_active.clone();
         // max packets
         let max_packets_limit = self.max_packets;
@@ -422,35 +428,21 @@ impl App {
         }
     }
 
-    pub fn stop_real_capture(&mut self) {
+    pub fn stop_capture(&mut self) {
         self.capture_active.store(false, Ordering::SeqCst);
     }
 
     pub fn toggle_capture(&mut self) {
-        if self.ui_focus == UIFocus::Interfaces && self.interface_changed {
-            let was_capturing = self.capture_active.load(Ordering::SeqCst);
-            if was_capturing {
-                self.stop_real_capture();
-            }
-            self.clear_packets();
-            self.interface_changed = false;
-            if was_capturing {
-                std::thread::sleep(Duration::from_millis(50));
-                self.start_real_capture();
-            } else {
-                self.start_real_capture();
-            }
+        let was_capturing = self.capture_active.load(Ordering::SeqCst);
+        if (was_capturing) {
+            self.stop_capture();
         } else {
-            if self.capture_active.load(Ordering::SeqCst) {
-                self.stop_real_capture();
-            } else {
-                self.start_real_capture();
-            }
+            self.capture_active.store(true, Ordering::SeqCst);
         }
     }
 
     pub fn refresh_interfaces(&mut self) {
         self.network.scan_interfaces();
-        self.interfaces = Self::get_real_interfaces(&self.network);
+        self.interfaces = Self::get_interfaces(&self.network);
     }
 }

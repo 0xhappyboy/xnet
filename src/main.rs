@@ -57,19 +57,39 @@ fn run_app(
                     }
                     KeyCode::Char(' ') => {
                         if app.ui_focus == app::UIFocus::Interfaces {
-                            let display_selected = match app.interfaces_list_state.selected() {
-                                Some(idx) => idx,
-                                None => app.selected_interface,
-                            };
-                            if display_selected != app.selected_interface {
-                                app.selected_interface = display_selected;
-                                let was_capturing = app.capture_active.load(Ordering::SeqCst);
-                                if was_capturing {
-                                    app.stop_real_capture();
-                                    app.clear_packets();
-                                    app.start_real_capture();
-                                } else {
-                                    app.clear_packets();
+                            let list_selected = app.interfaces_list_state.selected();
+                            if let Some(selected_idx) = list_selected {
+                                if selected_idx < app.interfaces.len() {
+                                    let list_iface = &app.interfaces[selected_idx];
+                                    let mut should_change = false;
+                                    if app.current_interface.is_none() {
+                                        app.current_interface = Some(list_iface.clone());
+                                        should_change = true;
+                                    } else {
+                                        should_change = match &app.current_interface {
+                                            Some(current_iface) => {
+                                                current_iface.name != list_iface.name
+                                            }
+                                            None => true,
+                                        };
+                                    }
+                                    if should_change {
+                                        app.current_interface = Some(list_iface.clone());
+                                        app.selected_interface = selected_idx;
+                                        let was_capturing =
+                                            app.capture_active.load(Ordering::SeqCst);
+                                        if was_capturing {
+                                            app.toggle_capture();
+                                            std::thread::sleep(Duration::from_millis(100));
+                                            app.clear_packets();
+                                            app.start_capture();
+                                        } else {
+                                            app.clear_packets();
+                                            app.start_capture();
+                                        }
+                                    } else {
+                                        app.toggle_capture();
+                                    }
                                 }
                             } else {
                                 app.toggle_capture();
