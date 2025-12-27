@@ -1,6 +1,5 @@
 mod app;
 mod net;
-mod protocol;
 mod types;
 mod ui;
 
@@ -18,6 +17,8 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 
+use crate::types::NetworkInterface;
+
 fn main() -> Result<(), io::Error> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -25,6 +26,7 @@ fn main() -> Result<(), io::Error> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     let mut app = App::new();
+    app.start_traffic_monitor();
     let tick_rate = Duration::from_millis(100);
     let mut last_tick = Instant::now();
     let res = run_app(&mut terminal, &mut app, tick_rate, &mut last_tick);
@@ -59,37 +61,53 @@ fn run_app(
                         if app.ui_focus == app::UIFocus::Interfaces {
                             let list_selected = app.interfaces_list_state.selected();
                             if let Some(selected_idx) = list_selected {
-                                if selected_idx < app.interfaces.len() {
-                                    let list_iface = &app.interfaces[selected_idx];
-                                    let mut should_change = false;
-                                    if app.current_interface.is_none() {
-                                        app.current_interface = Some(list_iface.clone());
-                                        should_change = true;
+                                let should_change = {
+                                    let interfaces_read = app.interfaces.read().unwrap();
+                                    if selected_idx >= interfaces_read.len() {
+                                        false
                                     } else {
-                                        should_change = match &app.current_interface {
-                                            Some(current_iface) => {
-                                                current_iface.name != list_iface.name
-                                            }
-                                            None => true,
-                                        };
-                                    }
-                                    if should_change {
-                                        app.current_interface = Some(list_iface.clone());
-                                        app.selected_interface = selected_idx;
-                                        let was_capturing =
-                                            app.capture_active.load(Ordering::SeqCst);
-                                        if was_capturing {
-                                            app.toggle_capture();
-                                            std::thread::sleep(Duration::from_millis(100));
-                                            app.clear_packets();
-                                            app.start_capture();
+                                        let list_iface = &interfaces_read[selected_idx];
+                                        if app.current_interface.is_none() {
+                                            true
                                         } else {
-                                            app.clear_packets();
-                                            app.start_capture();
+                                            match &app.current_interface {
+                                                Some(current_iface) => {
+                                                    current_iface.name != list_iface.name
+                                                }
+                                                None => true,
+                                            }
                                         }
-                                    } else {
-                                        app.toggle_capture();
                                     }
+                                };
+                                if should_change {
+                                    let interface_name = {
+                                        let interfaces_read = app.interfaces.read().unwrap();
+                                        interfaces_read[selected_idx].name.clone()
+                                    };
+                                    app.current_interface = Some(NetworkInterface {
+                                        name: interface_name,
+                                        description: String::new(),
+                                        ip_address: String::new(),
+                                        mac_address: String::new(),
+                                        is_up: false,
+                                        packets_received: 0,
+                                        packets_sent: 0,
+                                        bytes_received: 0,
+                                        bytes_sent: 0,
+                                    });
+                                    app.selected_interface = selected_idx;
+                                    let was_capturing = app.capture_active.load(Ordering::SeqCst);
+                                    if was_capturing {
+                                        app.toggle_capture();
+                                        std::thread::sleep(Duration::from_millis(100));
+                                        app.clear_packets();
+                                        app.start_capture();
+                                    } else {
+                                        app.clear_packets();
+                                        app.start_capture();
+                                    }
+                                } else {
+                                    app.toggle_capture();
                                 }
                             } else {
                                 app.toggle_capture();

@@ -7,9 +7,11 @@ use crate::{
 };
 use ratatui::widgets::{ListState, TableState};
 use std::{
+    collections::HashMap,
     sync::{
         Arc, RwLock,
         atomic::{AtomicBool, Ordering},
+        mpsc,
     },
     thread,
     time::{Duration, Instant},
@@ -27,7 +29,7 @@ pub struct App {
     pub should_quit: bool,
     pub ui_focus: UIFocus,
     pub capture_active: Arc<AtomicBool>,
-    pub interfaces: Vec<NetworkInterface>,
+    pub interfaces: Arc<RwLock<Vec<NetworkInterface>>>,
     pub current_interface: Option<NetworkInterface>,
     pub packets: Arc<RwLock<Vec<NetworkPacket>>>,
     pub selected_packet: Option<usize>,
@@ -49,6 +51,59 @@ pub struct App {
     pub network: Network,
     pub interface_changed: bool,
     pub max_packets: Option<usize>,
+    pub traffic_monitor_active: Arc<AtomicBool>, // is traffic monitoring activated
+    pub interface_stats: Arc<RwLock<HashMap<String, InterfaceTrafficStats>>>, // interface traffic statistics
+}
+
+#[derive(Debug, Clone)]
+pub struct InterfaceTrafficStats {
+    pub name: String,
+    pub rx_bytes: u64,
+    pub tx_bytes: u64,
+    pub rx_packets: u64,
+    pub tx_packets: u64,
+    pub rx_bytes_per_sec: u64,   // bytes received per second.
+    pub tx_bytes_per_sec: u64,   // bytes sent per second.
+    pub rx_packets_per_sec: u64, // packets received per second.
+    pub tx_packets_per_sec: u64, // packets sent per second.
+    pub last_update: Instant,
+}
+
+impl InterfaceTrafficStats {
+    pub fn new(name: String) -> Self {
+        Self {
+            name,
+            rx_bytes: 0,
+            tx_bytes: 0,
+            rx_packets: 0,
+            tx_packets: 0,
+            rx_bytes_per_sec: 0,
+            tx_bytes_per_sec: 0,
+            rx_packets_per_sec: 0,
+            tx_packets_per_sec: 0,
+            last_update: Instant::now(),
+        }
+    }
+
+    pub fn update(&mut self, rx_bytes: u64, tx_bytes: u64, rx_packets: u64, tx_packets: u64) {
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.last_update).as_secs_f64();
+        if elapsed > 0.0 {
+            let rx_bytes_diff = rx_bytes.saturating_sub(self.rx_bytes);
+            let tx_bytes_diff = tx_bytes.saturating_sub(self.tx_bytes);
+            let rx_packets_diff = rx_packets.saturating_sub(self.rx_packets);
+            let tx_packets_diff = tx_packets.saturating_sub(self.tx_packets);
+            self.rx_bytes_per_sec = (rx_bytes_diff as f64 / elapsed) as u64;
+            self.tx_bytes_per_sec = (tx_bytes_diff as f64 / elapsed) as u64;
+            self.rx_packets_per_sec = (rx_packets_diff as f64 / elapsed) as u64;
+            self.tx_packets_per_sec = (tx_packets_diff as f64 / elapsed) as u64;
+        }
+        self.rx_bytes = rx_bytes;
+        self.tx_bytes = tx_bytes;
+        self.rx_packets = rx_packets;
+        self.tx_packets = tx_packets;
+        self.last_update = now;
+    }
 }
 
 impl App {
@@ -62,11 +117,11 @@ impl App {
         let mut network = Network::new();
         network.scan_interfaces();
         let interfaces = Self::get_interfaces(&network);
-        Self {
+        let app = Self {
             should_quit: false,
-            ui_focus: UIFocus::Packets,
+            ui_focus: UIFocus::Interfaces,
             capture_active: Arc::new(AtomicBool::new(false)),
-            interfaces: interfaces.clone(),
+            interfaces: Arc::new(RwLock::new(interfaces.clone())),
             current_interface: None,
             packets: Arc::new(RwLock::new(Vec::new())),
             selected_packet: None,
@@ -88,7 +143,84 @@ impl App {
             network,
             interface_changed: false,
             max_packets: Some(5000),
+            traffic_monitor_active: Arc::new(AtomicBool::new(false)),
+            interface_stats: Arc::new(RwLock::new(HashMap::new())),
+        };
+        app
+    }
+
+    pub fn start_traffic_monitor(&self) {
+        self.traffic_monitor_active.store(true, Ordering::SeqCst);
+        let interfaces_read = self.interfaces.read().unwrap();
+        let interfaces_list = interfaces_read.clone();
+        drop(interfaces_read);
+        for interface in interfaces_list {
+            let interface_name = interface.name.clone();
+            let interface_stats = Arc::clone(&self.interface_stats);
+            let traffic_monitor_active = Arc::clone(&self.traffic_monitor_active);
+            let network_clone = self.network.clone();
+            thread::spawn(move || {
+                let config = ScannerConfig {
+                    filter_protocol: None,
+                };
+                let mut scanner = NetworkScanner::new(network_clone, config);
+                let interface_name_clone = interface_name.clone();
+                match scanner.start_scan(interface_name.clone(), move |packet| {
+                    if traffic_monitor_active.load(Ordering::SeqCst) {
+                        let mut stats_write = interface_stats.write().unwrap();
+                        let stats = stats_write
+                            .entry(interface_name.clone())
+                            .or_insert_with(|| InterfaceTrafficStats::new(interface_name.clone()));
+                        stats.rx_packets += 1;
+                        stats.rx_bytes += packet.length as u64;
+                        let now = Instant::now();
+                        let elapsed = now.duration_since(stats.last_update).as_secs_f64();
+                        if elapsed >= 1.0 {
+                            stats.rx_bytes_per_sec = (stats.rx_bytes as f64 / elapsed) as u64;
+                            stats.tx_bytes_per_sec = (stats.tx_bytes as f64 / elapsed) as u64;
+                            stats.rx_packets_per_sec = (stats.rx_packets as f64 / elapsed) as u64;
+                            stats.tx_packets_per_sec = (stats.tx_packets as f64 / elapsed) as u64;
+                            stats.last_update = now;
+                        }
+                    }
+                }) {
+                    Ok(_) => loop {
+                        thread::sleep(Duration::from_secs(1));
+                    },
+                    Err(e) => {}
+                }
+            });
         }
+    }
+
+    pub fn stop_traffic_monitor(&mut self) {
+        self.traffic_monitor_active.store(false, Ordering::SeqCst);
+    }
+
+    pub fn get_interface_stats(&self, interface_name: &str) -> Option<InterfaceTrafficStats> {
+        let stats_read = self.interface_stats.read().unwrap();
+        stats_read.get(interface_name).cloned()
+    }
+
+    pub fn get_all_interface_stats(&self) -> Vec<InterfaceTrafficStats> {
+        let stats_read = self.interface_stats.read().unwrap();
+        stats_read.values().cloned().collect()
+    }
+
+    pub fn get_total_traffic_stats(&self) -> InterfaceTrafficStats {
+        let stats = self.get_all_interface_stats();
+        let mut total = InterfaceTrafficStats::new("Total".to_string());
+        for stat in stats {
+            total.rx_bytes += stat.rx_bytes;
+            total.tx_bytes += stat.tx_bytes;
+            total.rx_packets += stat.rx_packets;
+            total.tx_packets += stat.tx_packets;
+            total.rx_bytes_per_sec += stat.rx_bytes_per_sec;
+            total.tx_bytes_per_sec += stat.tx_bytes_per_sec;
+            total.rx_packets_per_sec += stat.rx_packets_per_sec;
+            total.tx_packets_per_sec += stat.tx_packets_per_sec;
+        }
+        total
     }
 
     fn get_interfaces(network: &Network) -> Vec<NetworkInterface> {
@@ -112,18 +244,17 @@ impl App {
 
     pub fn start_capture(&mut self) {
         self.capture_active.store(true, Ordering::SeqCst);
-        if self.interfaces.is_empty() {
+        if self.interfaces.read().unwrap().is_empty() {
             return;
         }
         let config = ScannerConfig {
             filter_protocol: None,
         };
         let mut scanner = NetworkScanner::new(self.network.clone(), config);
-        let (tx, rx) = std::sync::mpsc::channel::<Packet>();
+        let (tx, rx) = mpsc::channel::<Packet>();
         let packets_clone = self.packets.clone();
         let interface_name = self.current_interface.clone().unwrap().name.clone();
         let capture_active_clone = self.capture_active.clone();
-        // max packets
         let max_packets_limit = self.max_packets;
         let processing_thread = thread::spawn(move || {
             while let Ok(packet) = rx.recv() {
@@ -154,13 +285,15 @@ impl App {
             }
         });
         let scanner_thread = thread::spawn(move || {
-            match scanner.start_scan(interface_name, move |packet| {
+            match scanner.start_scan(interface_name.clone(), move |packet| {
                 let _ = tx.send(packet);
             }) {
                 Ok(_) => loop {
-                    std::thread::sleep(Duration::from_secs(1));
+                    thread::sleep(Duration::from_secs(1));
                 },
-                Err(e) => {}
+                Err(e) => {
+                    eprintln!("Scanner error: {:?}", e);
+                }
             }
         });
     }
@@ -231,7 +364,7 @@ impl App {
         let i = match self.interfaces_list_state.selected() {
             Some(i) => {
                 if i == 0 {
-                    self.interfaces.len() - 1
+                    self.interfaces.read().unwrap().len() - 1
                 } else {
                     i - 1
                 }
@@ -250,7 +383,7 @@ impl App {
         let old_interface = self.selected_interface;
         let i = match self.interfaces_list_state.selected() {
             Some(i) => {
-                if i >= self.interfaces.len() - 1 {
+                if i >= self.interfaces.read().unwrap().len() - 1 {
                     0
                 } else {
                     i + 1
@@ -443,6 +576,27 @@ impl App {
 
     pub fn refresh_interfaces(&mut self) {
         self.network.scan_interfaces();
-        self.interfaces = Self::get_interfaces(&self.network);
+        let new_interfaces = Self::get_interfaces(&self.network);
+        {
+            let mut interfaces_write = self.interfaces.write().unwrap();
+            *interfaces_write = new_interfaces;
+        }
+    }
+
+    pub fn cleanup(&mut self) {
+        self.stop_capture();
+        self.stop_traffic_monitor();
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::app::App;
+
+    #[tokio::test]
+    async fn test_start_traffic_monitor() {
+        let mut app = App::new();
+        app.start_traffic_monitor();
+        loop {}
     }
 }

@@ -15,7 +15,8 @@ use ratatui::{
 };
 
 fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
-    let interface = &app.interfaces[app.selected_interface];
+    let interfaces_read = app.interfaces.read().unwrap();
+    let interface = &interfaces_read[app.selected_interface];
     let packets_read = app.get_packets_read();
     let total_packets = packets_read.len();
     let total_bytes: usize = packets_read.iter().map(|p| p.length).sum();

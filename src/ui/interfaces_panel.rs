@@ -1,4 +1,4 @@
-use crate::app::{App, UIFocus};
+use crate::app::{App, InterfaceTrafficStats, UIFocus};
 use ratatui::{
     Frame,
     prelude::Rect,
@@ -13,8 +13,9 @@ pub fn render_interfaces_panel(frame: &mut Frame, area: Rect, app: &App) {
         .bg(Color::DarkGray)
         .add_modifier(Modifier::BOLD);
     let normal_style = Style::default().fg(Color::Gray);
-    let items: Vec<ListItem> = app
-        .interfaces
+    let interfaces_read = app.interfaces.read().unwrap();
+    let interface_stats = app.get_all_interface_stats();
+    let items: Vec<ListItem> = interfaces_read
         .iter()
         .enumerate()
         .map(|(i, interface)| {
@@ -29,6 +30,31 @@ pub fn render_interfaces_panel(frame: &mut Frame, area: Rect, app: &App) {
                 Color::Green
             } else {
                 Color::Red
+            };
+            let binding = InterfaceTrafficStats::new(interface.name.clone());
+            let traffic_stats = interface_stats
+                .iter()
+                .find(|stats| stats.name == interface.name)
+                .unwrap_or(&binding);
+            let format_bytes = |bytes: u64| {
+                if bytes >= 1024 * 1024 * 1024 {
+                    format!("{:.2} GiB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+                } else if bytes >= 1024 * 1024 {
+                    format!("{:.2} MiB", bytes as f64 / (1024.0 * 1024.0))
+                } else if bytes >= 1024 {
+                    format!("{:.2} KiB", bytes as f64 / 1024.0)
+                } else {
+                    format!("{} B", bytes)
+                }
+            };
+            let format_rate = |rate: u64| {
+                if rate >= 1024 * 1024 {
+                    format!("{:.2} MB/s", rate as f64 / (1024.0 * 1024.0))
+                } else if rate >= 1024 {
+                    format!("{:.2} KB/s", rate as f64 / 1024.0)
+                } else {
+                    format!("{} B/s", rate)
+                }
             };
             let lines = vec![
                 Line::from(vec![
@@ -48,31 +74,64 @@ pub fn render_interfaces_panel(frame: &mut Frame, area: Rect, app: &App) {
                     Span::styled(&interface.mac_address, Style::default().fg(Color::Magenta)),
                 ]),
                 Line::from(vec![
-                    Span::raw("  RX: "),
+                    Span::raw("  RX Rate: "),
+                    Span::styled(
+                        format_rate(traffic_stats.rx_bytes_per_sec),
+                        Style::default().fg(Color::Green),
+                    ),
+                    Span::raw(" ("),
+                    Span::styled(
+                        format!("{} pkt/s", traffic_stats.rx_packets_per_sec),
+                        Style::default().fg(Color::Green),
+                    ),
+                    Span::raw(")"),
+                ]),
+                Line::from(vec![
+                    Span::raw("  TX Rate: "),
+                    Span::styled(
+                        format_rate(traffic_stats.tx_bytes_per_sec),
+                        Style::default().fg(Color::Yellow),
+                    ),
+                    Span::raw(" ("),
+                    Span::styled(
+                        format!("{} pkt/s", traffic_stats.tx_packets_per_sec),
+                        Style::default().fg(Color::Yellow),
+                    ),
+                    Span::raw(")"),
+                ]),
+                Line::from(vec![
+                    Span::raw("  RX Total: "),
+                    Span::styled(
+                        format_bytes(interface.bytes_received),
+                        Style::default().fg(Color::Green),
+                    ),
+                    Span::raw(" ("),
                     Span::styled(
                         format!("{} packets", interface.packets_received),
                         Style::default().fg(Color::Green),
                     ),
-                    Span::raw(" / "),
-                    Span::styled(
-                        format!("{} B", interface.bytes_received),
-                        Style::default().fg(Color::Green),
-                    ),
+                    Span::raw(")"),
                 ]),
                 Line::from(vec![
-                    Span::raw("  TX: "),
+                    Span::raw("  TX Total: "),
+                    Span::styled(
+                        format_bytes(interface.bytes_sent),
+                        Style::default().fg(Color::Yellow),
+                    ),
+                    Span::raw(" ("),
                     Span::styled(
                         format!("{} packets", interface.packets_sent),
                         Style::default().fg(Color::Yellow),
                     ),
-                    Span::raw(" / "),
-                    Span::styled(
-                        format!("{} B", interface.bytes_sent),
-                        Style::default().fg(Color::Yellow),
-                    ),
+                    Span::raw(")"),
                 ]),
                 Line::from(vec![
                     Span::raw("  Total: "),
+                    Span::styled(
+                        format_bytes(interface.bytes_received + interface.bytes_sent),
+                        Style::default().fg(Color::Cyan),
+                    ),
+                    Span::raw(" ("),
                     Span::styled(
                         format!(
                             "{} packets",
@@ -80,11 +139,7 @@ pub fn render_interfaces_panel(frame: &mut Frame, area: Rect, app: &App) {
                         ),
                         Style::default().fg(Color::Cyan),
                     ),
-                    Span::raw(" / "),
-                    Span::styled(
-                        format!("{} B", interface.bytes_received + interface.bytes_sent),
-                        Style::default().fg(Color::Cyan),
-                    ),
+                    Span::raw(")"),
                 ]),
             ];
             ListItem::new(lines).style(style)
