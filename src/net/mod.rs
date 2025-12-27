@@ -1,46 +1,6 @@
 pub mod scanner;
 
-use std::net::IpAddr;
-
-use crate::types::Protocol;
-
-#[derive(Debug, Clone)]
-pub struct InterfaceInfo {
-    pub display_name: String,
-    pub original_name: String,
-    pub pnet_name: String,
-    pub description: String,
-    pub ip_address: String,
-    pub mac_address: String,
-    pub is_up: bool,
-    pub packets_received: u64,
-    pub bytes_received: u64,
-    pub packets_sent: u64,
-    pub bytes_sent: u64,
-}
-
-#[derive(Debug, Clone)]
-pub struct Packet {
-    pub timestamp: String,
-    pub source: IpAddr,
-    pub destination: IpAddr,
-    pub protocol: Protocol,
-    pub length: usize,
-    pub info: String,
-    pub raw_data: Vec<u8>,
-}
-
-#[derive(Debug, Clone)]
-pub struct PacketLayer {
-    pub name: String,
-    pub fields: Vec<(String, String)>,
-}
-
-#[derive(Debug, Clone)]
-pub struct PacketDetail {
-    pub layers: Vec<PacketLayer>,
-    pub hex_dump: String,
-}
+use crate::types::{InterfaceInfo, Packet, Protocol};
 
 #[derive(Debug, Clone)]
 pub struct Network {
@@ -179,8 +139,6 @@ pub fn generate_hex_dump(data: &[u8], bytes_per_line: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use crate::net::{
         Network,
         scanner::{NetworkScanner, ScannerConfig},

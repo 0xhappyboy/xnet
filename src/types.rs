@@ -71,3 +71,29 @@ pub struct PacketLayer {
     pub name: String,
     pub fields: Vec<(String, String)>,
 }
+
+#[derive(Debug, Clone)]
+pub struct Packet {
+    pub timestamp: String,
+    pub source: IpAddr,
+    pub destination: IpAddr,
+    pub protocol: Protocol,
+    pub length: usize,
+    pub info: String,
+    pub raw_data: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+pub struct InterfaceInfo {
+    pub display_name: String,
+    pub original_name: String,
+    pub pnet_name: String,
+    pub description: String,
+    pub ip_address: String,
+    pub mac_address: String,
+    pub is_up: bool,
+    pub packets_received: u64,
+    pub bytes_received: u64,
+    pub packets_sent: u64,
+    pub bytes_sent: u64,
+}

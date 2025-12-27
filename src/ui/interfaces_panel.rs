@@ -4,7 +4,7 @@ use ratatui::{
     prelude::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, List, ListItem},
 };
 
 pub fn render_interfaces_panel(frame: &mut Frame, area: Rect, app: &App) {

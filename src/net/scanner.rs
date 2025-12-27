@@ -9,9 +9,10 @@ use pnet::packet::udp::UdpPacket;
 use std::net::IpAddr;
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use crate::net::{Network, Packet, PacketDetail, PacketLayer, Protocol};
+use crate::net::Network;
+use crate::types::{Packet, PacketDetail, PacketLayer, Protocol};
 
 #[derive(Debug, Clone)]
 pub struct ScannerConfig {
@@ -134,7 +135,6 @@ impl NetworkScanner {
             Ok(_) => return Err("Unsupported channel type".to_string()),
             Err(e) => return Err(format!("Failed to create channel: {}", e)),
         };
-        let start_time = Instant::now();
         let mut packet_count = 0;
         loop {
             match receiver.next() {
@@ -349,6 +349,7 @@ impl NetworkScanner {
         PacketDetail {
             layers,
             hex_dump: super::generate_hex_dump(&packet.raw_data, 16),
+            summary: "".to_string(),
         }
     }
 

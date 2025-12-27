@@ -1,8 +1,4 @@
-use crate::net::{
-    Network, Packet,
-    scanner::{NetworkScanner, ScannerConfig},
-};
-use crate::types::{NetworkInterface, NetworkPacket, PacketDetail, PacketLayer, Protocol};
+use crate::{net::{Network, scanner::{NetworkScanner, ScannerConfig}}, types::{NetworkInterface, NetworkPacket, Packet, PacketDetail}};
 use ratatui::widgets::{ListState, TableState};
 use std::{
     sync::{
@@ -390,125 +386,19 @@ impl App {
     fn update_packet_detail(&mut self, index: usize) {
         let packet_option = self.get_packet(index);
         if let Some(packet) = packet_option {
-            let mut layers = Vec::new();
-            layers.push(PacketLayer {
-                name: "Ethernet Layer".to_string(),
-                fields: vec![
-                    ("Source MAC".to_string(), "00:1A:2B:3C:4D:5E".to_string()),
-                    (
-                        "Destination MAC".to_string(),
-                        "AA:BB:CC:DD:EE:FF".to_string(),
-                    ),
-                    ("Type".to_string(), "0x0800 (IPv4)".to_string()),
-                    ("Length".to_string(), "1500".to_string()),
-                ],
-            });
-            layers.push(PacketLayer {
-                name: "IP Layer".to_string(),
-                fields: vec![
-                    (
-                        "Version".to_string(),
-                        if packet.source.is_ipv6() {
-                            "IPv6"
-                        } else {
-                            "IPv4"
-                        }
-                        .to_string(),
-                    ),
-                    ("Source Address".to_string(), packet.source.to_string()),
-                    (
-                        "Destination Address".to_string(),
-                        packet.destination.to_string(),
-                    ),
-                    ("TTL".to_string(), "64".to_string()),
-                    (
-                        "Protocol".to_string(),
-                        match &packet.protocol {
-                            Protocol::TCP => "6 (TCP)",
-                            Protocol::UDP => "17 (UDP)",
-                            Protocol::ICMP => "1 (ICMP)",
-                            _ => "Other",
-                        }
-                        .to_string(),
-                    ),
-                    ("Header Length".to_string(), "20 bytes".to_string()),
-                ],
-            });
-            let transport_layer = match &packet.protocol {
-                Protocol::TCP => PacketLayer {
-                    name: "TCP Layer".to_string(),
-                    fields: vec![
-                        ("Source Port".to_string(), packet.src_port.to_string()),
-                        ("Destination Port".to_string(), packet.dst_port.to_string()),
-                        ("Sequence Number".to_string(), "123456789".to_string()),
-                        ("Acknowledgment Number".to_string(), "987654321".to_string()),
-                        ("Flags".to_string(), "ACK".to_string()),
-                        ("Window Size".to_string(), "65535".to_string()),
-                        ("Checksum".to_string(), "0xABCD".to_string()),
-                        ("Urgent Pointer".to_string(), "0".to_string()),
-                    ],
-                },
-                Protocol::UDP => PacketLayer {
-                    name: "UDP Layer".to_string(),
-                    fields: vec![
-                        ("Source Port".to_string(), packet.src_port.to_string()),
-                        ("Destination Port".to_string(), packet.dst_port.to_string()),
-                        ("Length".to_string(), packet.length.to_string()),
-                        ("Checksum".to_string(), "0xABCD".to_string()),
-                    ],
-                },
-                _ => PacketLayer {
-                    name: "Transport Layer".to_string(),
-                    fields: vec![
-                        ("Protocol".to_string(), format!("{:?}", packet.protocol)),
-                        ("Length".to_string(), packet.length.to_string()),
-                    ],
-                },
+            let temp_packet = Packet {
+                timestamp: packet.timestamp.clone(),
+                source: packet.source,
+                destination: packet.destination,
+                protocol: packet.protocol.clone(),
+                length: packet.length,
+                info: packet.info.clone(),
+                raw_data: packet.raw_data.clone(),
             };
-            layers.push(transport_layer);
-            if packet.info.contains("HTTP") {
-                layers.push(PacketLayer {
-                    name: "HTTP Layer".to_string(),
-                    fields: vec![
-                        (
-                            "Method".to_string(),
-                            if packet.info.contains("GET") {
-                                "GET"
-                            } else {
-                                "POST"
-                            }
-                            .to_string(),
-                        ),
-                        ("URL".to_string(), "/api/data".to_string()),
-                        ("Version".to_string(), "HTTP/1.1".to_string()),
-                        ("Host".to_string(), "example.com".to_string()),
-                        ("User-Agent".to_string(), "xnet/0.1.0".to_string()),
-                        ("Content-Type".to_string(), "application/json".to_string()),
-                    ],
-                });
-            } else if packet.info.contains("DNS") {
-                layers.push(PacketLayer {
-                    name: "DNS Layer".to_string(),
-                    fields: vec![
-                        ("Query".to_string(), "google.com".to_string()),
-                        ("Type".to_string(), "A".to_string()),
-                        ("Class".to_string(), "IN".to_string()),
-                        ("ID".to_string(), "0x1234".to_string()),
-                        ("Flags".to_string(), "Standard Query".to_string()),
-                    ],
-                });
-            }
-            let hex_dump = "\
-0000: 00 1A 2B 3C 4D 5E AA BB  CC DD EE FF 08 00 45 00  ..+<M^......E.
-0010: 00 3C 12 34 40 00 40 06  8A BC C0 A8 01 64 08 08  .<.4@.@......d..
-0020: 08 08 9C 40 00 50 12 34  56 78 00 00 00 00 50 02  ...@.P.Vx....P.
-0030: 20 00 91 7C 00 00 47 45  54 20 2F 20 48 54 54 50   ..|..GET / HTTP
-0040: 2F 31 2E 31 0D 0A 48 6F  73 74 3A 20 65 78 61 6D  /1.1..Host: exam
-0050: 70 6C 65 2E 63 6F 6D 0D  0A 55 73 65 72 2D 41 67  ple.com..User-Ag
-0060: 65 6E 74 3A 20 78 6E 65  74 2F 30 2E 31 2E 30 0D  ent: xnet/0.1.0"
-                .to_string();
+            let detail = NetworkScanner::generate_packet_detail(&temp_packet);
+            let hex_dump = crate::net::generate_hex_dump(&packet.raw_data, 16);
             self.packet_detail = Some(PacketDetail {
-                layers,
+                layers: detail.layers,
                 hex_dump,
                 summary: format!(
                     "{}:{} → {}:{} ({})",
@@ -523,6 +413,12 @@ impl App {
             self.selected_detail_layer = Some(0);
             self.hex_list_state.select(Some(0));
             self.selected_hex_line = Some(0);
+        } else {
+            self.packet_detail = None;
+            self.details_list_state.select(None);
+            self.selected_detail_layer = None;
+            self.hex_list_state.select(None);
+            self.selected_hex_line = None;
         }
     }
 
