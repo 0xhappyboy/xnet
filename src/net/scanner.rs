@@ -39,7 +39,10 @@ impl NetworkScanner {
         }
     }
 
-    pub fn start_scan(&mut self, interface_name: String) -> Result<(), String> {
+    pub fn start_scan<F>(&mut self, interface_name: String, mut callback: F) -> Result<(), String>
+    where
+        F: FnMut(Packet) + Send + 'static,
+    {
         if self.is_running {
             return Err("Scanner is already running".to_string());
         }
@@ -63,14 +66,54 @@ impl NetworkScanner {
             .ok_or_else(|| format!("Pnet interface '{}' not found", interface_info.pnet_name))?;
         self.current_interface_name = Some(interface_name);
         self.is_running = true;
-        let (tx, rx) = std::sync::mpsc::channel();
         let config = self.config.clone();
         let interface = pnet_interface.clone();
         thread::spawn(move || {
-            if let Err(e) = Self::capture_packets(&interface, tx, config) {
-                eprintln!("Capture error: {}", e);
+            let (mut sender, mut receiver) = match datalink::channel(&interface, Default::default())
+            {
+                Ok(Ethernet(tx, rx)) => (tx, rx),
+                Ok(_) => {
+                    return;
+                }
+                Err(e) => {
+                    return;
+                }
+            };
+            let start_time = Instant::now();
+            let mut packet_count = 0;
+            loop {
+                if start_time.elapsed() > config.timeout {
+                    break;
+                }
+                if packet_count >= config.max_packets {
+                    break;
+                }
+                match receiver.next() {
+                    Ok(packet_data) => {
+                        if let Some(parsed_packet) = Self::parse_packet(&packet_data) {
+                            if let Some(filter) = &config.filter_protocol {
+                                if !Self::matches_protocol(&parsed_packet.protocol, filter) {
+                                    continue;
+                                }
+                            }
+                            callback(parsed_packet);
+                            packet_count += 1;
+                        }
+                    }
+                    Err(e) => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                }
             }
         });
+        let (tx, rx) = std::sync::mpsc::channel();
+        let config_clone = self.config.clone();
+        let interface_clone = pnet_interface.clone();
+        thread::spawn(
+            move || {
+                if let Err(e) = Self::capture_packets(&interface_clone, tx, config_clone) {}
+            },
+        );
         self.process_packets(rx);
         Ok(())
     }
@@ -125,9 +168,7 @@ impl NetworkScanner {
                         packet_count += 1;
                     }
                 }
-                Err(e) => {
-                    eprintln!("Error receiving packet: {}", e);
-                }
+                Err(e) => {}
             }
         }
 
@@ -300,9 +341,7 @@ impl NetworkScanner {
                         self.packets.drain(0..500);
                     }
                 }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    // Continue waiting
-                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                     break;
                 }

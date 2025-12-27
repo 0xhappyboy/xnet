@@ -23,6 +23,8 @@ pub fn render_packets_table(frame: &mut Frame, area: Rect, app: &mut App) {
     .style(Style::default().fg(Color::Yellow))
     .height(1);
     let packets_read = app.get_packets_read();
+    let total_packets = packets_read.len();
+    let total_bytes: usize = packets_read.iter().map(|p| p.length).sum();
     let start_idx = packets_read.len().saturating_sub(50);
     let recent_packets = &packets_read[start_idx..];
     let rows: Vec<Row> = recent_packets
@@ -99,8 +101,8 @@ pub fn render_packets_table(frame: &mut Frame, area: Rect, app: &mut App) {
     };
     let stats_text = format!(
         "Total: {} packets | {} B | Selected: {}",
-        app.total_packets,
-        app.total_bytes,
+        total_packets,
+        total_bytes,
         app.selected_packet
             .map_or("None".to_string(), |i| format!("#{}", i))
     );

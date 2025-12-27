@@ -14,6 +14,9 @@ use ratatui::{
 
 fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     let interface = &app.interfaces[app.selected_interface];
+    let packets_read = app.get_packets_read();
+    let total_packets = packets_read.len();
+    let total_bytes: usize = packets_read.iter().map(|p| p.length).sum();
     let focus_text = match app.ui_focus {
         UIFocus::Interfaces => "Interface Panel",
         UIFocus::Packets => "Packet List",
@@ -29,8 +32,8 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             "Paused"
         },
-        app.total_packets,
-        app.total_bytes
+        total_packets,
+        total_bytes
     );
     let status_style = if app.capture_active {
         Style::default().fg(Color::Green).bg(Color::DarkGray)
@@ -42,7 +45,6 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         .block(Block::default().borders(Borders::ALL));
     frame.render_widget(status_bar, area);
 }
-
 fn render_help_bar(frame: &mut Frame, area: Rect) {
     let help_items = vec![
         ("q", "Quit"),

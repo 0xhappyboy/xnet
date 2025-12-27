@@ -1,11 +1,12 @@
 use crate::net::{
-    Network,
+    Network, Packet,
     scanner::{NetworkScanner, ScannerConfig},
 };
 use crate::types::{NetworkInterface, NetworkPacket, PacketDetail, PacketLayer, Protocol};
 use ratatui::widgets::{ListState, TableState};
 use std::{
     sync::{Arc, RwLock},
+    thread,
     time::{Duration, Instant},
 };
 
@@ -115,28 +116,59 @@ impl App {
         let selected_iface = &self.interfaces[selected_iface_idx];
         let config = ScannerConfig {
             max_packets: usize::MAX,
-            timeout: Duration::from_secs(3600),
+            timeout: Duration::from_secs(10),
             filter_protocol: None,
         };
         let mut scanner = NetworkScanner::new(self.network.clone(), config);
-        match scanner.start_scan(selected_iface.name.clone()) {
-            Ok(_) => {
-                self.network_scanner = Some(scanner);
-                self.real_capture_active = true;
-                self.capture_active = true;
+        let (tx, rx) = std::sync::mpsc::channel::<Packet>();
+        let packets_clone = self.packets.clone();
+        let interface_name = selected_iface.name.clone();
+        let processing_thread = thread::spawn(move || {
+            let timeout_duration = Duration::from_millis(100);
+            while let Ok(packet) = rx.recv_timeout(timeout_duration) {
+                let mut packets_write = packets_clone.write().unwrap();
+                let (src_port, dst_port) = Self::parse_ports_from_info(&packet.info);
+                let network_packet = NetworkPacket {
+                    id: packets_write.len() as u64,
+                    timestamp: packet.timestamp.clone(),
+                    source: packet.source,
+                    destination: packet.destination,
+                    src_port,
+                    dst_port,
+                    protocol: packet.protocol.clone(),
+                    length: packet.length,
+                    info: packet.info.clone(),
+                    raw_data: packet.raw_data.clone(),
+                };
+                packets_write.push(network_packet);
+                if packets_write.len() > 1000 {
+                    let to_remove = packets_write.len() - 1000;
+                    packets_write.drain(0..to_remove);
+                }
             }
-            Err(e) => {
-                self.capture_active = true;
+        });
+        let scanner_thread = thread::spawn(move || {
+            match scanner.start_scan(interface_name, move |packet| {
+                let _ = tx.send(packet);
+            }) {
+                Ok(_) => {
+                    std::thread::sleep(Duration::from_millis(100));
+                    scanner.stop_scan();
+                }
+                Err(e) => {}
             }
-        }
+        });
+        self.real_capture_active = true;
+        self.capture_active = true;
     }
 
     pub fn stop_real_capture(&mut self) {
+        self.real_capture_active = false;
+        self.capture_active = false;
         if let Some(scanner) = &mut self.network_scanner {
             scanner.stop_scan();
         }
-        self.real_capture_active = false;
-        self.capture_active = false;
+        self.packets.write().unwrap().clear();
     }
 
     pub fn toggle_real_capture(&mut self) {
@@ -144,43 +176,6 @@ impl App {
             self.stop_real_capture();
         } else {
             self.start_real_capture();
-        }
-    }
-
-    pub fn update_from_scanner(&mut self) {
-        if !self.real_capture_active {
-            return;
-        }
-        if let Some(scanner) = &self.network_scanner {
-            let scanner_packets = scanner.get_packets();
-            if !scanner_packets.is_empty() {
-                let mut packets_write = self.packets.write().unwrap();
-                let old_len = packets_write.len();
-                for packet in scanner_packets.iter() {
-                    let (src_port, dst_port) = Self::parse_ports_from_info(&packet.info);
-                    let network_packet = NetworkPacket {
-                        id: self.packet_counter + 1,
-                        timestamp: packet.timestamp.clone(),
-                        source: packet.source,
-                        destination: packet.destination,
-                        src_port,
-                        dst_port,
-                        protocol: packet.protocol.clone(),
-                        length: packet.length,
-                        info: packet.info.clone(),
-                        raw_data: packet.raw_data.clone(),
-                    };
-                    packets_write.push(network_packet);
-                    self.packet_counter += 1;
-                    self.total_packets += 1;
-                    self.total_bytes += packet.length as u64;
-                }
-                if packets_write.len() > 1000 {
-                    let to_remove = packets_write.len() - 1000;
-                    packets_write.drain(0..to_remove);
-                }
-                drop(packets_write);
-            }
         }
     }
 
@@ -572,16 +567,6 @@ impl App {
             self.stop_real_capture();
         } else {
             self.start_real_capture();
-        }
-    }
-
-    pub fn on_tick(&mut self) {
-        if self.real_capture_active {
-            let now = Instant::now();
-            if now.duration_since(self.last_real_update) >= self.real_update_interval {
-                self.update_from_scanner();
-                self.last_real_update = now;
-            }
         }
     }
 

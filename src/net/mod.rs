@@ -212,7 +212,12 @@ mod tests {
                 filter_protocol: None,
             };
             let mut scanner = crate::net::scanner::NetworkScanner::new(network.clone(), config);
-            match scanner.start_scan(iface.display_name.clone()) {
+            let captured_packets = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let captured_packets_clone = captured_packets.clone();
+            match scanner.start_scan(iface.display_name.clone(), move |packet| {
+                let mut packets = captured_packets_clone.lock().unwrap();
+                packets.push(packet);
+            }) {
                 Ok(_) => {
                     println!("Starting packet capture for 5 seconds...");
                     println!("Press Ctrl+C or wait for timeout");
@@ -220,7 +225,7 @@ mod tests {
                     let start_time = Instant::now();
                     let mut last_packet_count = 0;
                     while start_time.elapsed() < Duration::from_secs(5) {
-                        let packets = scanner.get_packets();
+                        let packets = captured_packets.lock().unwrap();
                         let packet_count = packets.len();
                         if packet_count > last_packet_count {
                             println!("=== New Packet(s) Captured ===");
@@ -260,6 +265,7 @@ mod tests {
                                     packet.info.chars().take(40).collect::<String>()
                                 );
                             }
+
                             let total_bytes: usize = packets.iter().map(|p| p.length).sum();
                             println!(
                                 "-------------------------------------------------------------------------------"
@@ -271,16 +277,21 @@ mod tests {
                             println!();
                             last_packet_count = packet_count;
                         }
+                        drop(packets);
                         std::thread::sleep(Duration::from_millis(100));
                     }
                     scanner.stop_scan();
-                    let final_packets = scanner.get_packets();
+                    let final_packets = captured_packets.lock().unwrap();
                     println!("=== Capture Complete ===");
                     println!("Total packets captured: {}", final_packets.len());
-                    assert!(
-                        final_packets.len() > 0 || std::env::var("CI").is_ok(),
-                        "No packets captured. This may be expected in CI environments."
-                    );
+                    if std::env::var("CI").is_err() {
+                        assert!(
+                            final_packets.len() > 0,
+                            "No packets captured in non-CI environment"
+                        );
+                    } else {
+                        println!("CI environment detected, skipping packet count assertion");
+                    }
                 }
                 Err(e) => {
                     println!("Failed to start capture: {}", e);
@@ -404,11 +415,19 @@ mod tests {
                 };
                 let mut packet_scanner = NetworkScanner::new(network.clone(), config);
                 println!("\nStarting packet capture test...");
-                match packet_scanner.start_scan(ethernet_iface.display_name.clone()) {
+                let captured_packets = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+                let captured_packets_clone = captured_packets.clone();
+                match packet_scanner.start_scan(
+                    ethernet_iface.display_name.clone(),
+                    move |packet| {
+                        let mut packets = captured_packets_clone.lock().unwrap();
+                        packets.push(packet);
+                    },
+                ) {
                     Ok(_) => {
                         std::thread::sleep(Duration::from_secs(1));
                         packet_scanner.stop_scan();
-                        let packets = packet_scanner.get_packets();
+                        let packets = captured_packets.lock().unwrap();
                         println!("Captured {} packets", packets.len());
                         if !packets.is_empty() {
                             let packet = &packets[0];
