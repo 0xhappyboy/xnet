@@ -1,6 +1,5 @@
 pub mod scanner;
 
-use pnet::datalink;
 use std::net::IpAddr;
 
 use crate::types::Protocol;

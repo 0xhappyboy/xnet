@@ -44,6 +44,7 @@ pub struct App {
     pub interface_change_delay: Duration,
     pub network_scanner: Option<NetworkScanner>,
     pub network: Network,
+    pub interface_changed: bool,
 }
 
 impl App {
@@ -80,6 +81,7 @@ impl App {
             interface_change_delay: Duration::from_millis(200),
             network_scanner: None,
             network,
+            interface_changed: false,
         }
     }
 
@@ -217,6 +219,7 @@ impl App {
         if self.ui_focus != UIFocus::Interfaces {
             return;
         }
+        let old_interface = self.selected_interface;
         let i = match self.interfaces_list_state.selected() {
             Some(i) => {
                 if i == 0 {
@@ -229,12 +232,14 @@ impl App {
         };
         self.interfaces_list_state.select(Some(i));
         self.selected_interface = i;
+        self.interface_changed = old_interface != i;
     }
 
     pub fn interface_down(&mut self) {
         if self.ui_focus != UIFocus::Interfaces {
             return;
         }
+        let old_interface = self.selected_interface;
         let i = match self.interfaces_list_state.selected() {
             Some(i) => {
                 if i >= self.interfaces.len() - 1 {
@@ -247,30 +252,7 @@ impl App {
         };
         self.interfaces_list_state.select(Some(i));
         self.selected_interface = i;
-    }
-
-    pub fn select_next_interface(&mut self) {
-        let now = Instant::now();
-        if now.duration_since(self.last_interface_change) >= self.interface_change_delay {
-            self.selected_interface = (self.selected_interface + 1) % self.interfaces.len();
-            self.last_interface_change = now;
-            self.interfaces_list_state
-                .select(Some(self.selected_interface));
-        }
-    }
-
-    pub fn select_prev_interface(&mut self) {
-        let now = Instant::now();
-        if now.duration_since(self.last_interface_change) >= self.interface_change_delay {
-            if self.selected_interface == 0 {
-                self.selected_interface = self.interfaces.len() - 1;
-            } else {
-                self.selected_interface -= 1;
-            }
-            self.last_interface_change = now;
-            self.interfaces_list_state
-                .select(Some(self.selected_interface));
-        }
+        self.interface_changed = old_interface != i; 
     }
 
     pub fn select_next_packet(&mut self) {
@@ -543,10 +525,25 @@ impl App {
     }
 
     pub fn toggle_capture(&mut self) {
-        if self.capture_active.load(Ordering::SeqCst) {
-            self.stop_real_capture();
+        if self.ui_focus == UIFocus::Interfaces && self.interface_changed {
+            let was_capturing = self.capture_active.load(Ordering::SeqCst);
+            if was_capturing {
+                self.stop_real_capture();
+            }
+            self.clear_packets();
+            self.interface_changed = false;
+            if was_capturing {
+                std::thread::sleep(Duration::from_millis(50));
+                self.start_real_capture();
+            } else {
+                self.start_real_capture();
+            }
         } else {
-            self.start_real_capture();
+            if self.capture_active.load(Ordering::SeqCst) {
+                self.stop_real_capture();
+            } else {
+                self.start_real_capture();
+            }
         }
     }
 

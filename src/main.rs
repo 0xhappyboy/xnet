@@ -8,6 +8,7 @@ use app::App;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{
     io,
+    sync::atomic::Ordering,
     time::{Duration, Instant},
 };
 
@@ -55,7 +56,27 @@ fn run_app(
                         return Ok(());
                     }
                     KeyCode::Char(' ') => {
-                        app.toggle_capture();
+                        if app.ui_focus == app::UIFocus::Interfaces {
+                            let display_selected = match app.interfaces_list_state.selected() {
+                                Some(idx) => idx,
+                                None => app.selected_interface,
+                            };
+                            if display_selected != app.selected_interface {
+                                app.selected_interface = display_selected;
+                                let was_capturing = app.capture_active.load(Ordering::SeqCst);
+                                if was_capturing {
+                                    app.stop_real_capture();
+                                    app.clear_packets();
+                                    app.start_real_capture();
+                                } else {
+                                    app.clear_packets();
+                                }
+                            } else {
+                                app.toggle_capture();
+                            }
+                        } else {
+                            app.toggle_capture();
+                        }
                     }
                     KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
                         match app.ui_focus {
