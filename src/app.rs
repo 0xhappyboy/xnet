@@ -1,7 +1,11 @@
+use crate::net::{
+    Network,
+    scanner::{NetworkScanner, ScannerConfig},
+};
 use crate::types::{NetworkInterface, NetworkPacket, PacketDetail, PacketLayer, Protocol};
 use ratatui::widgets::{ListState, TableState};
 use std::{
-    net::IpAddr,
+    sync::{Arc, RwLock},
     time::{Duration, Instant},
 };
 
@@ -18,7 +22,7 @@ pub struct App {
     pub ui_focus: UIFocus,
     pub capture_active: bool,
     pub interfaces: Vec<NetworkInterface>,
-    pub packets: Vec<NetworkPacket>,
+    pub packets: Arc<RwLock<Vec<NetworkPacket>>>,
     pub selected_packet: Option<usize>,
     pub packet_detail: Option<PacketDetail>,
     pub interfaces_list_state: ListState,
@@ -34,6 +38,11 @@ pub struct App {
     pub packet_counter: u64,
     pub last_interface_change: Instant,
     pub interface_change_delay: Duration,
+    pub network_scanner: Option<NetworkScanner>,
+    pub network: Network,
+    pub real_capture_active: bool,
+    pub last_real_update: Instant,
+    pub real_update_interval: Duration,
 }
 
 impl App {
@@ -44,12 +53,15 @@ impl App {
         details_list_state.select(Some(0));
         let mut hex_list_state = ListState::default();
         hex_list_state.select(Some(0));
+        let mut network = Network::new();
+        network.scan_interfaces();
+        let interfaces = Self::get_real_interfaces(&network);
         Self {
             should_quit: false,
             ui_focus: UIFocus::Packets,
             capture_active: false,
-            interfaces: Self::generate_mock_interfaces(),
-            packets: Vec::new(),
+            interfaces: interfaces,
+            packets: Arc::new(RwLock::new(Vec::new())),
             selected_packet: None,
             packet_detail: None,
             interfaces_list_state,
@@ -65,124 +77,160 @@ impl App {
             packet_counter: 0,
             last_interface_change: Instant::now(),
             interface_change_delay: Duration::from_millis(200),
+            network_scanner: None,
+            network,
+            real_capture_active: false,
+            last_real_update: Instant::now(),
+            real_update_interval: Duration::from_millis(500),
         }
     }
 
-    fn generate_mock_interfaces() -> Vec<NetworkInterface> {
-        vec![
-            NetworkInterface {
-                name: "eth0".to_string(),
-                description: "Main Ethernet".to_string(),
-                ip_address: "192.168.1.100".to_string(),
-                mac_address: "00:1A:2B:3C:4D:5E".to_string(),
-                is_up: true,
-                packets_received: 15042,
-                packets_sent: 8923,
-                bytes_received: 15203456,
-                bytes_sent: 8456723,
-            },
-            NetworkInterface {
-                name: "wlan0".to_string(),
-                description: "Wireless Network".to_string(),
-                ip_address: "10.0.0.15".to_string(),
-                mac_address: "AA:BB:CC:DD:EE:FF".to_string(),
-                is_up: true,
-                packets_received: 23456,
-                packets_sent: 12345,
-                bytes_received: 45678901,
-                bytes_sent: 23456789,
-            },
-            NetworkInterface {
-                name: "lo".to_string(),
-                description: "Local Loopback".to_string(),
-                ip_address: "127.0.0.1".to_string(),
-                mac_address: "00:00:00:00:00:00".to_string(),
-                is_up: true,
-                packets_received: 500,
-                packets_sent: 500,
-                bytes_received: 50000,
-                bytes_sent: 50000,
-            },
-            NetworkInterface {
-                name: "docker0".to_string(),
-                description: "Docker Bridge".to_string(),
-                ip_address: "172.17.0.1".to_string(),
-                mac_address: "02:42:AC:11:00:01".to_string(),
-                is_up: true,
-                packets_received: 7890,
-                packets_sent: 4567,
-                bytes_received: 12345678,
-                bytes_sent: 8765432,
-            },
-        ]
+    fn get_real_interfaces(network: &Network) -> Vec<NetworkInterface> {
+        let interfaces = network.get_interfaces();
+        interfaces
+            .iter()
+            .enumerate()
+            .map(|(i, iface)| NetworkInterface {
+                name: iface.display_name.clone(),
+                description: iface.description.clone(),
+                ip_address: iface.ip_address.clone(),
+                mac_address: iface.mac_address.clone(),
+                is_up: iface.is_up,
+                packets_received: iface.packets_received,
+                packets_sent: iface.packets_sent,
+                bytes_received: iface.bytes_received,
+                bytes_sent: iface.bytes_sent,
+            })
+            .collect()
     }
 
-    pub fn generate_mock_packets(&mut self, count: usize) {
-        use std::net::{Ipv4Addr, Ipv6Addr};
-        let protocols = vec![
-            Protocol::TCP,
-            Protocol::UDP,
-            Protocol::HTTP,
-            Protocol::HTTPS,
-            Protocol::DNS,
-            Protocol::ICMP,
-            Protocol::ARP,
-        ];
-        let infos = vec![
-            "GET /api/data HTTP/1.1",
-            "DNS query for google.com",
-            "TCP SYN → 443",
-            "TLS Client Hello",
-            "ICMP Echo Request",
-            "ARP Who has 192.168.1.1?",
-            "POST /login HTTP/1.1",
-            "UDP 53 → 53",
-            "TCP ACK",
-            "WebSocket Handshake",
-        ];
-        for _ in 0..count {
-            self.packet_counter += 1;
-            let protocol = protocols[self.packet_counter as usize % protocols.len()].clone();
-            let info = infos[self.packet_counter as usize % infos.len()].to_string();
-            let packet = NetworkPacket {
-                id: self.packet_counter,
-                timestamp: chrono::Local::now().format("%H:%M:%S%.3f").to_string(),
-                source: if self.packet_counter % 3 == 0 {
-                    IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1))
-                } else {
-                    IpAddr::V4(Ipv4Addr::new(
-                        192,
-                        168,
-                        1,
-                        (self.packet_counter % 255) as u8,
-                    ))
-                },
-                destination: if self.packet_counter % 4 == 0 {
-                    IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2))
-                } else {
-                    IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))
-                },
-                src_port: 40000 + (self.packet_counter % 1000) as u16,
-                dst_port: match protocol {
-                    Protocol::TCP => 8080,
-                    Protocol::UDP => 53,
-                    Protocol::HTTP => 80,
-                    Protocol::HTTPS => 443,
-                    Protocol::DNS => 53,
-                    _ => 0,
-                },
-                protocol,
-                length: 64 + (self.packet_counter % 1400) as usize,
-                info: info.clone(),
-                raw_data: vec![0u8; 32],
-            };
-            self.packets.push(packet.clone());
-            self.total_packets += 1;
-            self.total_bytes += packet.length as u64;
+    pub fn start_real_capture(&mut self) {
+        if self.real_capture_active {
+            return;
         }
-        if self.packets.len() > 1000 {
-            self.packets.drain(0..500);
+        if self.interfaces.is_empty() {
+            return;
         }
+        let selected_iface_idx = self.selected_interface % self.interfaces.len();
+        let selected_iface = &self.interfaces[selected_iface_idx];
+        let config = ScannerConfig {
+            max_packets: usize::MAX,
+            timeout: Duration::from_secs(3600),
+            filter_protocol: None,
+        };
+        let mut scanner = NetworkScanner::new(self.network.clone(), config);
+        match scanner.start_scan(selected_iface.name.clone()) {
+            Ok(_) => {
+                self.network_scanner = Some(scanner);
+                self.real_capture_active = true;
+                self.capture_active = true;
+            }
+            Err(e) => {
+                self.capture_active = true;
+            }
+        }
+    }
+
+    pub fn stop_real_capture(&mut self) {
+        if let Some(scanner) = &mut self.network_scanner {
+            scanner.stop_scan();
+        }
+        self.real_capture_active = false;
+        self.capture_active = false;
+    }
+
+    pub fn toggle_real_capture(&mut self) {
+        if self.real_capture_active {
+            self.stop_real_capture();
+        } else {
+            self.start_real_capture();
+        }
+    }
+
+    pub fn update_from_scanner(&mut self) {
+        if !self.real_capture_active {
+            return;
+        }
+        if let Some(scanner) = &self.network_scanner {
+            let scanner_packets = scanner.get_packets();
+            if !scanner_packets.is_empty() {
+                let mut packets_write = self.packets.write().unwrap();
+                let old_len = packets_write.len();
+                for packet in scanner_packets.iter() {
+                    let (src_port, dst_port) = Self::parse_ports_from_info(&packet.info);
+                    let network_packet = NetworkPacket {
+                        id: self.packet_counter + 1,
+                        timestamp: packet.timestamp.clone(),
+                        source: packet.source,
+                        destination: packet.destination,
+                        src_port,
+                        dst_port,
+                        protocol: packet.protocol.clone(),
+                        length: packet.length,
+                        info: packet.info.clone(),
+                        raw_data: packet.raw_data.clone(),
+                    };
+                    packets_write.push(network_packet);
+                    self.packet_counter += 1;
+                    self.total_packets += 1;
+                    self.total_bytes += packet.length as u64;
+                }
+                if packets_write.len() > 1000 {
+                    let to_remove = packets_write.len() - 1000;
+                    packets_write.drain(0..to_remove);
+                }
+                drop(packets_write);
+            }
+        }
+    }
+
+    fn parse_ports_from_info(info: &str) -> (u16, u16) {
+        let mut src_port = 0;
+        let mut dst_port = 0;
+        if let Some(tcp_udp_pos) = info.find("TCP") {
+            let rest = &info[tcp_udp_pos..];
+            if let Some(src_pos) = rest.find(':') {
+                if let Some(dst_pos) = rest[src_pos..].find("->") {
+                    let src_str = &rest[src_pos + 1..src_pos + dst_pos];
+                    if let Ok(port) = src_str.split(':').next().unwrap_or("0").parse::<u16>() {
+                        src_port = port;
+                    }
+                    let dst_rest = &rest[src_pos + dst_pos + 2..];
+                    if let Some(dst_colon_pos) = dst_rest.find(':') {
+                        let dst_str = &dst_rest[dst_colon_pos + 1..];
+                        if let Ok(port) = dst_str
+                            .split_whitespace()
+                            .next()
+                            .unwrap_or("0")
+                            .parse::<u16>()
+                        {
+                            dst_port = port;
+                        }
+                    }
+                }
+            }
+        }
+        (src_port, dst_port)
+    }
+
+    pub fn get_packets_read(&self) -> std::sync::RwLockReadGuard<'_, Vec<NetworkPacket>> {
+        self.packets.read().unwrap()
+    }
+
+    pub fn get_packet(&self, index: usize) -> Option<NetworkPacket> {
+        let packets_read = self.packets.read().unwrap();
+        packets_read.get(index).cloned()
+    }
+
+    pub fn clear_packets(&mut self) {
+        let mut packets_write = self.packets.write().unwrap();
+        packets_write.clear();
+        self.total_packets = 0;
+        self.total_bytes = 0;
+        self.packet_counter = 0;
+        self.selected_packet = None;
+        self.packet_detail = None;
+        drop(packets_write);
     }
 
     pub fn focus_next(&mut self) {
@@ -258,9 +306,11 @@ impl App {
         if self.ui_focus != UIFocus::Packets {
             return;
         }
+        let packets_read = self.packets.read().unwrap();
+        let packet_count = packets_read.len();
         let i = match self.packets_table_state.selected() {
             Some(i) => {
-                if i >= self.packets.len() - 1 {
+                if i >= packet_count.saturating_sub(1) {
                     0
                 } else {
                     i + 1
@@ -268,6 +318,7 @@ impl App {
             }
             None => 0,
         };
+        drop(packets_read);
         self.packets_table_state.select(Some(i));
         self.selected_packet = Some(i);
         self.update_packet_detail(i);
@@ -277,16 +328,19 @@ impl App {
         if self.ui_focus != UIFocus::Packets {
             return;
         }
+        let packets_read = self.packets.read().unwrap();
+        let packet_count = packets_read.len();
         let i = match self.packets_table_state.selected() {
             Some(i) => {
                 if i == 0 {
-                    self.packets.len() - 1
+                    packet_count.saturating_sub(1)
                 } else {
                     i - 1
                 }
             }
             None => 0,
         };
+        drop(packets_read);
         self.packets_table_state.select(Some(i));
         self.selected_packet = Some(i);
         self.update_packet_detail(i);
@@ -375,7 +429,8 @@ impl App {
     }
 
     fn update_packet_detail(&mut self, index: usize) {
-        if let Some(packet) = self.packets.get(index) {
+        let packet_option = self.get_packet(index);
+        if let Some(packet) = packet_option {
             let mut layers = Vec::new();
             layers.push(PacketLayer {
                 name: "Ethernet Layer".to_string(),
@@ -513,12 +568,25 @@ impl App {
     }
 
     pub fn toggle_capture(&mut self) {
-        self.capture_active = !self.capture_active;
+        if self.real_capture_active {
+            self.stop_real_capture();
+        } else {
+            self.start_real_capture();
+        }
     }
 
     pub fn on_tick(&mut self) {
-        if self.capture_active {
-            self.generate_mock_packets(1 + (self.packet_counter % 3) as usize);
+        if self.real_capture_active {
+            let now = Instant::now();
+            if now.duration_since(self.last_real_update) >= self.real_update_interval {
+                self.update_from_scanner();
+                self.last_real_update = now;
+            }
         }
+    }
+
+    pub fn refresh_interfaces(&mut self) {
+        self.network.scan_interfaces();
+        self.interfaces = Self::get_real_interfaces(&self.network);
     }
 }

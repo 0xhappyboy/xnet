@@ -81,20 +81,24 @@ fn run_app(
                         app::UIFocus::Hex => app.hex_down(),
                     },
                     KeyCode::Char('r') => {
-                        app.packets.clear();
-                        app.total_packets = 0;
-                        app.total_bytes = 0;
-                        app.packet_counter = 0;
-                        app.generate_mock_packets(20);
+                        app.clear_packets();
+                    }
+                    KeyCode::Char('i') => {
+                        app.refresh_interfaces();
+                    }
+                    KeyCode::Char('t') => {
+                        app.toggle_real_capture();
                     }
                     _ => {}
                 }
             }
         }
+
         if last_tick.elapsed() >= tick_rate {
             app.on_tick();
             *last_tick = Instant::now();
         }
+
         if app.should_quit {
             return Ok(());
         }

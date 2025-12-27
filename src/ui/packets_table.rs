@@ -22,8 +22,9 @@ pub fn render_packets_table(frame: &mut Frame, area: Rect, app: &mut App) {
     ])
     .style(Style::default().fg(Color::Yellow))
     .height(1);
-    let start_idx = app.packets.len().saturating_sub(50);
-    let recent_packets = &app.packets[start_idx..];
+    let packets_read = app.get_packets_read();
+    let start_idx = packets_read.len().saturating_sub(50);
+    let recent_packets = &packets_read[start_idx..];
     let rows: Vec<Row> = recent_packets
         .iter()
         .enumerate()
@@ -60,6 +61,7 @@ pub fn render_packets_table(frame: &mut Frame, area: Rect, app: &mut App) {
             .height(1)
         })
         .collect();
+    drop(packets_read);
     let block_title = if app.ui_focus == UIFocus::Packets {
         "Network Packet List [Focused]"
     } else {
