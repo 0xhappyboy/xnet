@@ -45,6 +45,7 @@ pub struct App {
     pub network_scanner: Option<NetworkScanner>,
     pub network: Network,
     pub interface_changed: bool,
+    pub max_packets: Option<usize>,
 }
 
 impl App {
@@ -82,6 +83,7 @@ impl App {
             network_scanner: None,
             network,
             interface_changed: false,
+            max_packets: Some(5000),
         }
     }
 
@@ -119,12 +121,20 @@ impl App {
         let packets_clone = self.packets.clone();
         let interface_name = selected_iface.name.clone();
         let capture_active_clone = self.capture_active.clone();
+        // max packets
+        let max_packets_limit = self.max_packets;
         let processing_thread = thread::spawn(move || {
             while let Ok(packet) = rx.recv() {
                 if !capture_active_clone.load(Ordering::SeqCst) {
                     continue;
                 }
                 let mut packets_write = packets_clone.write().unwrap();
+                if let Some(max) = max_packets_limit {
+                    if packets_write.len() >= max {
+                        let to_remove = packets_write.len() - max + 1;
+                        packets_write.drain(0..to_remove);
+                    }
+                }
                 let (src_port, dst_port) = Self::parse_ports_from_info(&packet.info);
                 let network_packet = NetworkPacket {
                     id: packets_write.len() as u64,
@@ -139,10 +149,6 @@ impl App {
                     raw_data: packet.raw_data.clone(),
                 };
                 packets_write.push(network_packet);
-                if packets_write.len() > 1000 {
-                    let to_remove = packets_write.len() - 1000;
-                    packets_write.drain(0..to_remove);
-                }
             }
         });
         let scanner_thread = thread::spawn(move || {
@@ -252,7 +258,7 @@ impl App {
         };
         self.interfaces_list_state.select(Some(i));
         self.selected_interface = i;
-        self.interface_changed = old_interface != i; 
+        self.interface_changed = old_interface != i;
     }
 
     pub fn select_next_packet(&mut self) {

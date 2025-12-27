@@ -319,9 +319,6 @@ impl NetworkScanner {
             match rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(packet) => {
                     self.packets.push(packet);
-                    if self.packets.len() > 1000 {
-                        self.packets.drain(0..500);
-                    }
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
