@@ -86,18 +86,13 @@ fn run_app(
                     KeyCode::Char('i') => {
                         app.refresh_interfaces();
                     }
-                    KeyCode::Char('t') => {
-                        app.toggle_real_capture();
-                    }
                     _ => {}
                 }
             }
         }
-
         if last_tick.elapsed() >= tick_rate {
             *last_tick = Instant::now();
         }
-
         if app.should_quit {
             return Ok(());
         }

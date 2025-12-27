@@ -5,7 +5,10 @@ use crate::net::{
 use crate::types::{NetworkInterface, NetworkPacket, PacketDetail, PacketLayer, Protocol};
 use ratatui::widgets::{ListState, TableState};
 use std::{
-    sync::{Arc, RwLock},
+    sync::{
+        Arc, RwLock,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -21,7 +24,7 @@ pub enum UIFocus {
 pub struct App {
     pub should_quit: bool,
     pub ui_focus: UIFocus,
-    pub capture_active: bool,
+    pub capture_active: Arc<AtomicBool>,
     pub interfaces: Vec<NetworkInterface>,
     pub packets: Arc<RwLock<Vec<NetworkPacket>>>,
     pub selected_packet: Option<usize>,
@@ -41,9 +44,6 @@ pub struct App {
     pub interface_change_delay: Duration,
     pub network_scanner: Option<NetworkScanner>,
     pub network: Network,
-    pub real_capture_active: bool,
-    pub last_real_update: Instant,
-    pub real_update_interval: Duration,
 }
 
 impl App {
@@ -60,7 +60,7 @@ impl App {
         Self {
             should_quit: false,
             ui_focus: UIFocus::Packets,
-            capture_active: false,
+            capture_active: Arc::new(AtomicBool::new(false)),
             interfaces: interfaces,
             packets: Arc::new(RwLock::new(Vec::new())),
             selected_packet: None,
@@ -80,9 +80,6 @@ impl App {
             interface_change_delay: Duration::from_millis(200),
             network_scanner: None,
             network,
-            real_capture_active: false,
-            last_real_update: Instant::now(),
-            real_update_interval: Duration::from_millis(500),
         }
     }
 
@@ -106,9 +103,7 @@ impl App {
     }
 
     pub fn start_real_capture(&mut self) {
-        if self.real_capture_active {
-            return;
-        }
+        self.capture_active.store(true, Ordering::SeqCst);
         if self.interfaces.is_empty() {
             return;
         }
@@ -121,8 +116,12 @@ impl App {
         let (tx, rx) = std::sync::mpsc::channel::<Packet>();
         let packets_clone = self.packets.clone();
         let interface_name = selected_iface.name.clone();
+        let capture_active_clone = self.capture_active.clone();
         let processing_thread = thread::spawn(move || {
             while let Ok(packet) = rx.recv() {
+                if !capture_active_clone.load(Ordering::SeqCst) {
+                    continue;
+                }
                 let mut packets_write = packets_clone.write().unwrap();
                 let (src_port, dst_port) = Self::parse_ports_from_info(&packet.info);
                 let network_packet = NetworkPacket {
@@ -154,25 +153,6 @@ impl App {
                 Err(e) => {}
             }
         });
-        self.real_capture_active = true;
-        self.capture_active = true;
-    }
-
-    pub fn stop_real_capture(&mut self) {
-        self.real_capture_active = false;
-        self.capture_active = false;
-        if let Some(scanner) = &mut self.network_scanner {
-            scanner.stop_scan();
-        }
-        self.packets.write().unwrap().clear();
-    }
-
-    pub fn toggle_real_capture(&mut self) {
-        if self.real_capture_active {
-            self.stop_real_capture();
-        } else {
-            self.start_real_capture();
-        }
     }
 
     fn parse_ports_from_info(info: &str) -> (u16, u16) {
@@ -558,8 +538,12 @@ impl App {
         }
     }
 
+    pub fn stop_real_capture(&mut self) {
+        self.capture_active.store(false, Ordering::SeqCst);
+    }
+
     pub fn toggle_capture(&mut self) {
-        if self.real_capture_active {
+        if self.capture_active.load(Ordering::SeqCst) {
             self.stop_real_capture();
         } else {
             self.start_real_capture();

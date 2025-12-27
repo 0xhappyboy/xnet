@@ -3,6 +3,8 @@ pub mod interfaces_panel;
 pub mod layout;
 pub mod packets_table;
 
+use std::sync::atomic::Ordering;
+
 use crate::app::{App, UIFocus};
 use ratatui::{
     Frame,
@@ -27,7 +29,7 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         "xnet v0.1.0 | Focus: {} | Interface: {} | Status: {} | Packets: {} | Traffic: {} B",
         focus_text,
         interface.name,
-        if app.capture_active {
+        if app.capture_active.load(Ordering::SeqCst) {
             "Capturing"
         } else {
             "Paused"
@@ -35,7 +37,7 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         total_packets,
         total_bytes
     );
-    let status_style = if app.capture_active {
+    let status_style = if app.capture_active.load(Ordering::SeqCst) {
         Style::default().fg(Color::Green).bg(Color::DarkGray)
     } else {
         Style::default().fg(Color::Yellow).bg(Color::DarkGray)
