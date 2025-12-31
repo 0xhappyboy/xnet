@@ -92,17 +92,20 @@ jobs:
           }
       
       - name: Build with Packet.lib
-        shell: cmd
+        shell: powershell
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          & "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
           
           cargo build --release
       
       - name: Prepare artifact
+        shell: powershell
         run: |
-          if exist "target\release\xnet.exe" (
-            copy target\release\xnet.exe xnet-windows-x86_64.exe
-          )
+          if (Test-Path "target\release\xnet.exe") {
+            Copy-Item "target\release\xnet.exe" "xnet-windows-x86_64.exe"
+          } else {
+            Write-Host "Warning: xnet.exe not found!"
+          }
       
       - name: Upload artifact
         uses: actions/upload-artifact@v4
