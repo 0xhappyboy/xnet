@@ -1,4 +1,4 @@
-name: Rust
+name: Build and Release
 
 on:
   push:
@@ -9,191 +9,77 @@ permissions:
   contents: write
   
 jobs:
-  build-linux-x86_64:
-    name: Build Linux x86_64
+  build-linux:
+    name: Build Linux
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v4
+      
+      - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-
-      - name: Install dependencies
+      
+      - name: Install libpcap
+        run: sudo apt-get update && sudo apt-get install -y libpcap-dev
+      
+      - name: Build
+        run: cargo build --release
+      
+      - name: Prepare artifact
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libpcap-dev pkg-config build-essential
-
-      - name: Build (gnu)
-        run: |
-          cargo build --release --target x86_64-unknown-linux-gnu
-          cp target/x86_64-unknown-linux-gnu/release/xnet xnet-linux-x86_64
+          cp target/release/xnet xnet-linux-x86_64
           strip xnet-linux-x86_64 || true
-
-      - name: Build (musl)
-        run: |
-          rustup target add x86_64-unknown-linux-musl
-          sudo apt-get install -y musl-tools
-          cargo build --release --target x86_64-unknown-linux-musl
-          cp target/x86_64-unknown-linux-musl/release/xnet xnet-linux-x86_64-musl
-          strip xnet-linux-x86_64-musl || true
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-x86_64
-          path: |
-            xnet-linux-x86_64
-            xnet-linux-x86_64-musl
-
-  build-linux-aarch64:
-    name: Build Linux ARM64
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup QEMU for ARM64
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user-static binfmt-support
-          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-
-      - name: Setup Rust for ARM64
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-          targets: aarch64-unknown-linux-gnu
-
-      - name: Install cross-compilation tools
-        run: |
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          sudo apt-get install -y libpcap-dev:arm64
-
-      - name: Set up cross-compilation environment
-        run: |
-          export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
-          export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
-          export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
-          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-
-      - name: Build for ARM64
-        run: |
-          cargo build --release --target aarch64-unknown-linux-gnu
-          cp target/aarch64-unknown-linux-gnu/release/xnet xnet-linux-aarch64
-          aarch64-linux-gnu-strip xnet-linux-aarch64 || true
-
+      
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: linux-aarch64
-          path: xnet-linux-aarch64
+          name: linux
+          path: xnet-linux-x86_64
 
   build-macos:
     name: Build macOS
     runs-on: macos-latest
     
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v4
+      
+      - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-
-      - name: Install dependencies
+      
+      - name: Build
+        run: cargo build --release
+      
+      - name: Prepare artifact
         run: |
-          brew install libpcap || true
-
-      - name: Build for Intel Mac
-        run: |
-          cargo build --release --target x86_64-apple-darwin
-          cp target/x86_64-apple-darwin/release/xnet xnet-macos-x86_64
-          strip xnet-macos-x86_64 || true
-
-      - name: Build for Apple Silicon
-        run: |
-          rustup target add aarch64-apple-darwin
-          cargo build --release --target aarch64-apple-darwin
-          cp target/aarch64-apple-darwin/release/xnet xnet-macos-aarch64
-          strip xnet-macos-aarch64 || true
-
-      - name: Upload artifacts
+          cp target/release/xnet xnet-macos-universal
+          strip xnet-macos-universal || true
+      
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos
-          path: |
-            xnet-macos-x86_64
-            xnet-macos-aarch64
+          path: xnet-macos-universal
 
   build-windows:
     name: Build Windows
     runs-on: windows-latest
     
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v4
+      
+      - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-
-      - name: Install Npcap SDK (替代 WinPcap)
-        shell: powershell
-        run: |
-          $npcapUrl = "https://npcap.com/dist/npcap-sdk-1.13.zip"
-          $output = "npcap-sdk.zip"
-          Invoke-WebRequest -Uri $npcapUrl -OutFile $output
-          
-          Expand-Archive -Path $output -DestinationPath "C:\npcap-sdk" -Force
-          
-          Copy-Item "C:\npcap-sdk\Lib\x64\Packet.lib" "C:\Program Files (x86)\Windows Kits\10\Lib\10.0.19041.0\um\x64\" -ErrorAction SilentlyContinue
-          
-          echo "NPCAP_SDK=C:\npcap-sdk" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "LIB=C:\npcap-sdk\Lib\x64;$env:LIB" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "INCLUDE=C:\npcap-sdk\Include;$env:INCLUDE" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Build with Npcap
-        shell: cmd
-        run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-          
-          cargo clean -p pnet
-          
-          cargo build --release --target x86_64-pc-windows-msvc
-          
-          if errorlevel 1 (
-            echo "Standard build failed, trying with no-default-features..."
-            cargo build --release --target x86_64-pc-windows-msvc --no-default-features
-          )
-
-      - name: Check if build succeeded
-        id: check_build
-        shell: cmd
-        run: |
-          if exist "target\x86_64-pc-windows-msvc\release\xnet.exe" (
-            echo "build_success=true" >> %GITHUB_OUTPUT%
-            echo "Build succeeded!"
-          ) else (
-            echo "build_success=false" >> %GITHUB_OUTPUT%
-            echo "Build failed!"
-          )
-
+      
+      - name: Build
+        run: cargo build --release
+      
       - name: Prepare artifact
-        if: steps.check_build.outputs.build_success == 'true'
-        shell: cmd
-        run: |
-          copy "target\x86_64-pc-windows-msvc\release\xnet.exe" "xnet-windows-x86_64.exe"
-
+        run: Copy-Item target\release\xnet.exe xnet-windows-x86_64.exe
+      
       - name: Upload artifact
-        if: steps.check_build.outputs.build_success == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: windows
@@ -201,22 +87,15 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build-linux-x86_64, build-linux-aarch64, build-macos, build-windows]
+    needs: [build-linux, build-macos, build-windows]
     runs-on: ubuntu-latest
-    if: always()
     
     steps:
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: ./artifacts
-
-      - name: List downloaded files
-        run: |
-          echo "=== Downloaded artifacts ==="
-          find ./artifacts -type f -name "xnet-*" -o -name "*.exe" | sort
-          echo "============================"
-
+      
       - name: Create Release
         uses: softprops/action-gh-release@v1
         env:
@@ -224,10 +103,4 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
-          generate_release_notes: true
-          draft: false
-          prerelease: false
-          files: |
-            ./artifacts/**/xnet-*
-            ./artifacts/**/*.exe
-        continue-on-error: true
+          files: ./artifacts/**/*
