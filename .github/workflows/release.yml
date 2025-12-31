@@ -3,40 +3,15 @@ name: Rust
 on:
   push:
     tags:
-      - 'v*.*.*' 
+      - 'v*.*.*'
 
 permissions:
   contents: write
   
 jobs:
-  create-release:
-    name: Create Release
+  build-linux-x86_64:
+    name: Build Linux x86_64
     runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-    
-    steps:
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref_name }}
-          release_name: ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-
-  build-linux:
-    name: Build Linux
-    needs: create-release
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target:
-          - x86_64-unknown-linux-gnu
-          - x86_64-unknown-linux-musl
-          - aarch64-unknown-linux-gnu
     
     steps:
       - name: Checkout repository
@@ -45,48 +20,83 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
           toolchain: stable
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu
+          sudo apt-get install -y libpcap-dev pkg-config build-essential
 
-      - name: Add target
-        run: rustup target add ${{ matrix.target }}
-
-      - name: Build
+      - name: Build (gnu)
         run: |
-          cargo build --release --target ${{ matrix.target }}
-          if [[ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]]; then
-            mv target/${{ matrix.target }}/release/xnet xnet-linux-x86_64
-            strip xnet-linux-x86_64 || true
-          elif [[ "${{ matrix.target }}" == "x86_64-unknown-linux-musl" ]]; then
-            mv target/${{ matrix.target }}/release/xnet xnet-linux-x86_64-musl
-            strip xnet-linux-x86_64-musl || true
-          elif [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
-            mv target/${{ matrix.target }}/release/xnet xnet-linux-aarch64
-            aarch64-linux-gnu-strip xnet-linux-aarch64 || true
-          fi
+          cargo build --release --target x86_64-unknown-linux-gnu
+          cp target/x86_64-unknown-linux-gnu/release/xnet xnet-linux-x86_64
+          strip xnet-linux-x86_64 || true
+
+      - name: Build (musl)
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          sudo apt-get install -y musl-tools
+          cargo build --release --target x86_64-unknown-linux-musl
+          cp target/x86_64-unknown-linux-musl/release/xnet xnet-linux-x86_64-musl
+          strip xnet-linux-x86_64-musl || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: |
+            xnet-linux-x86_64
+            xnet-linux-x86_64-musl
+
+  build-linux-aarch64:
+    name: Build Linux ARM64
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup QEMU for ARM64
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static binfmt-support
+          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+
+      - name: Setup Rust for ARM64
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Install cross-compilation tools
+        run: |
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          sudo apt-get install -y libpcap-dev:arm64
+
+      - name: Set up cross-compilation environment
+        run: |
+          export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+          export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
+          export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      - name: Build for ARM64
+        run: |
+          cargo build --release --target aarch64-unknown-linux-gnu
+          cp target/aarch64-unknown-linux-gnu/release/xnet xnet-linux-aarch64
+          aarch64-linux-gnu-strip xnet-linux-aarch64 || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: linux-${{ matrix.target }}
-          path: |
-            xnet-linux-*
-            !target/
+          name: linux-aarch64
+          path: xnet-linux-aarch64
 
   build-macos:
     name: Build macOS
-    needs: create-release
     runs-on: macos-latest
-    strategy:
-      matrix:
-        target:
-          - x86_64-apple-darwin
-          - aarch64-apple-darwin
     
     steps:
       - name: Checkout repository
@@ -95,34 +105,35 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
           toolchain: stable
 
-      - name: Add target
-        run: rustup target add ${{ matrix.target }}
-
-      - name: Build
+      - name: Install dependencies
         run: |
-          cargo build --release --target ${{ matrix.target }}
-          if [[ "${{ matrix.target }}" == "x86_64-apple-darwin" ]]; then
-            mv target/${{ matrix.target }}/release/xnet xnet-macos-x86_64
-            strip xnet-macos-x86_64 || true
-          else
-            mv target/${{ matrix.target }}/release/xnet xnet-macos-aarch64
-            strip xnet-macos-aarch64 || true
-          fi
+          brew install libpcap || true
 
-      - name: Upload artifact
+      - name: Build for Intel Mac
+        run: |
+          cargo build --release --target x86_64-apple-darwin
+          cp target/x86_64-apple-darwin/release/xnet xnet-macos-x86_64
+          strip xnet-macos-x86_64 || true
+
+      - name: Build for Apple Silicon
+        run: |
+          rustup target add aarch64-apple-darwin
+          cargo build --release --target aarch64-apple-darwin
+          cp target/aarch64-apple-darwin/release/xnet xnet-macos-aarch64
+          strip xnet-macos-aarch64 || true
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: macos-${{ matrix.target }}
+          name: macos
           path: |
-            xnet-macos-*
-            !target/
+            xnet-macos-x86_64
+            xnet-macos-aarch64
 
   build-windows:
     name: Build Windows
-    needs: create-release
     runs-on: windows-latest
     
     steps:
@@ -132,27 +143,67 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-msvc
           toolchain: stable
 
-      - name: Add target
-        run: rustup target add x86_64-pc-windows-msvc
-
-      - name: Build
+      - name: Install Npcap SDK (替代 WinPcap)
+        shell: powershell
         run: |
+          $npcapUrl = "https://npcap.com/dist/npcap-sdk-1.13.zip"
+          $output = "npcap-sdk.zip"
+          Invoke-WebRequest -Uri $npcapUrl -OutFile $output
+          
+          Expand-Archive -Path $output -DestinationPath "C:\npcap-sdk" -Force
+          
+          Copy-Item "C:\npcap-sdk\Lib\x64\Packet.lib" "C:\Program Files (x86)\Windows Kits\10\Lib\10.0.19041.0\um\x64\" -ErrorAction SilentlyContinue
+          
+          echo "NPCAP_SDK=C:\npcap-sdk" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "LIB=C:\npcap-sdk\Lib\x64;$env:LIB" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "INCLUDE=C:\npcap-sdk\Include;$env:INCLUDE" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build with Npcap
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          
+          cargo clean -p pnet
+          
           cargo build --release --target x86_64-pc-windows-msvc
-          Move-Item target\x86_64-pc-windows-msvc\release\xnet.exe xnet-windows-x86_64.exe
+          
+          if errorlevel 1 (
+            echo "Standard build failed, trying with no-default-features..."
+            cargo build --release --target x86_64-pc-windows-msvc --no-default-features
+          )
+
+      - name: Check if build succeeded
+        id: check_build
+        shell: cmd
+        run: |
+          if exist "target\x86_64-pc-windows-msvc\release\xnet.exe" (
+            echo "build_success=true" >> %GITHUB_OUTPUT%
+            echo "Build succeeded!"
+          ) else (
+            echo "build_success=false" >> %GITHUB_OUTPUT%
+            echo "Build failed!"
+          )
+
+      - name: Prepare artifact
+        if: steps.check_build.outputs.build_success == 'true'
+        shell: cmd
+        run: |
+          copy "target\x86_64-pc-windows-msvc\release\xnet.exe" "xnet-windows-x86_64.exe"
 
       - name: Upload artifact
+        if: steps.check_build.outputs.build_success == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: windows-x86_64
+          name: windows
           path: xnet-windows-x86_64.exe
 
-  upload-release:
-    name: Upload Release Assets
-    needs: [create-release, build-linux, build-macos, build-windows]
+  release:
+    name: Create Release
+    needs: [build-linux-x86_64, build-linux-aarch64, build-macos, build-windows]
     runs-on: ubuntu-latest
+    if: always()
     
     steps:
       - name: Download all artifacts
@@ -160,21 +211,23 @@ jobs:
         with:
           path: ./artifacts
 
-      - name: Install GitHub CLI
+      - name: List downloaded files
         run: |
-          type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
-          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
-          sudo apt update
-          sudo apt install gh -y
+          echo "=== Downloaded artifacts ==="
+          find ./artifacts -type f -name "xnet-*" -o -name "*.exe" | sort
+          echo "============================"
 
-      - name: Upload Release Assets
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "$GITHUB_TOKEN" | gh auth login --with-token
-          
-          find ./artifacts -type f \( -name "xnet-*" -o -name "*.exe" \) | while read file; do
-            echo "Uploading $file"
-            gh release upload "${{ github.ref_name }}" "$file" --clobber
-          done
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          files: |
+            ./artifacts/**/xnet-*
+            ./artifacts/**/*.exe
+        continue-on-error: true

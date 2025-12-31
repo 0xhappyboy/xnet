@@ -1,3 +1,9 @@
 /target
 .env
 /.cargo
+**/*.rs.bk
+Cargo.lock
+*.exe
+*.so
+*.dylib
+*.dll
